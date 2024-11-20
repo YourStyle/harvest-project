@@ -10,11 +10,18 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 from aiogram.filters.callback_data import CallbackData
 from bson.objectid import ObjectId
-from config import BOT_TOKEN, CHANNEL_ID, MONGODB_URI, DATABASE_NAME, COLLECTION_NAME
+
 import pymongo
 from pymongo.errors import PyMongoError
 from aiogram.utils.markdown import text, bold, hlink
 import logging
+
+
+BOT_TOKEN="7728371504:AAE9OKYCW5MVBYPB-nNJn60BZTk3viOxlzA"
+CHANNEL_ID="-1002370678576"
+MONGODB_URI="mongodb://Admin:PasswordForMongo63@194.87.186.63/admin?authMechanism=SCRAM-SHA-256"
+DATABASE_NAME="news_db"
+COLLECTION_NAME="articles"
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)

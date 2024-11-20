@@ -1,7 +1,4 @@
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")  # Токен вашего бота
 CHANNEL_ID = os.getenv("CHANNEL_ID")  # ID вашего канала, например, -1001234567890
