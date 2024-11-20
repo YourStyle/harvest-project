@@ -11,8 +11,6 @@ services:
   bot:
     build: ./bot
     container_name: telegram_bot
-    depends_on:
-      - mongodb
     networks:
       - harvest
 
