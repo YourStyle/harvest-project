@@ -1,0 +1,37 @@
+version: '3.7'
+
+networks:
+  harvest:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: 1500
+
+services:
+  mongodb:
+    build: ./db
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - harvest
+
+  bot:
+    build: ./bot
+    container_name: telegram_bot
+    depends_on:
+      - mongodb
+    networks:
+      - harvest
+
+  parser:
+    build: ./parser
+    container_name: parser_mock
+    depends_on:
+      - mongodb
+    networks:
+      - harvest
+
+volumes:
+  mongo_data:

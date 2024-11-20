@@ -1,4 +1,1 @@
-FROM ubuntu:latest
-LABEL authors="antoncukseev"
-
-ENTRYPOINT ["top", "-b"]
+FROM mongo:5.0

@@ -1,4 +1,10 @@
-FROM ubuntu:latest
-LABEL authors="antoncukseev"
+FROM python:3.9
 
-ENTRYPOINT ["top", "-b"]
+WORKDIR /app
+
+COPY parser_mock.py .
+COPY ../.env .
+
+RUN pip install -r requirements.txt
+
+CMD ["python", "parser_mock.py"]
