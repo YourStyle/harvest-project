@@ -267,7 +267,7 @@ async def cmd_start(message):
     await message.reply("Бот запущен и будет публиковать новости каждые 10 минут.")
 
 
-ALLOWED_USERS = [416546809]  # Замените на список ID разрешенных пользователей
+ALLOWED_USERS = [416546809, 282247284]  # Замените на список ID разрешенных пользователей
 
 
 class AddSourceStates(StatesGroup):
