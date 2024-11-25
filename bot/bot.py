@@ -16,12 +16,11 @@ from pymongo.errors import PyMongoError
 from aiogram.utils.markdown import text, bold, hlink
 import logging
 
-
-BOT_TOKEN="7728371504:AAE9OKYCW5MVBYPB-nNJn60BZTk3viOxlzA"
-CHANNEL_ID="-1002370678576"
-MONGODB_URI="mongodb://Admin:PasswordForMongo63@194.87.186.63/admin?authMechanism=SCRAM-SHA-256"
-DATABASE_NAME="news_db"
-COLLECTION_NAME="articles"
+BOT_TOKEN = "7728371504:AAE9OKYCW5MVBYPB-nNJn60BZTk3viOxlzA"
+CHANNEL_ID = "-1002370678576"
+MONGODB_URI = "mongodb://Admin:PasswordForMongo63@194.87.186.63/admin?authMechanism=SCRAM-SHA-256"
+DATABASE_NAME = "news_db"
+COLLECTION_NAME = "articles"
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -46,7 +45,9 @@ MAX_MESSAGE_LENGTH = 4096
 
 default_config = {
     "_id": "bot_config",
-    "news_per_hour": 5  # Значение по умолчанию
+    "news_per_hour": 5,  # Значение по умолчанию
+    "publish_interval": 3600,  # Значение по умолчанию в секундах (1 час)
+    "max_news_length": 4096  # Максимальная длина текста новости по умолчанию
 }
 
 config_collection.update_one(
@@ -54,6 +55,26 @@ config_collection.update_one(
     {"$setOnInsert": default_config},
     upsert=True
 )
+
+
+def truncate_text(news_text, max_length):
+    if len(news_text) <= max_length:
+        return news_text
+
+    # Находим позиции возможных окончаний предложений
+    sentence_endings = [m.end() for m in re.finditer(r'[.,;]', news_text)]
+    # Оставляем только те окончания, которые находятся в пределах max_length
+    valid_endings = [pos for pos in sentence_endings if pos <= max_length]
+
+    if valid_endings:
+        # Обрезаем текст по последнему подходящему окончанию предложения
+        cut_off = valid_endings[-1]
+        truncated = news_text[:cut_off]
+    else:
+        # Если нет подходящего окончания, просто обрезаем текст
+        truncated = news_text[:max_length]
+
+    return truncated.strip()
 
 
 # Определение класса состояний для FSM
@@ -89,177 +110,123 @@ async def process_news_per_hour(message: Message, state: FSMContext):
     await state.clear()
 
 
-def split_text(text, max_length=MAX_MESSAGE_LENGTH):
-    """
-    Разбивает текст на части, каждая из которых не превышает max_length символов.
-    Постарается разбивать по переносам строк для сохранения читаемости.
-    """
-    if len(text) <= max_length:
-        return [text]
+async def publish_single_news(news):
+    config = config_collection.find_one({"_id": "bot_config"})
+    max_news_length = config.get('max_news_length', 4096)
 
-    parts = []
-    while len(text) > max_length:
-        # Найти последнее вхождение переноса строки в пределах max_length
-        split_index = text.rfind('\n', 0, max_length)
-        if split_index == -1:
-            # Если перенос строки не найден, разбиваем строго по max_length
-            split_index = max_length
-        part = text[:split_index]
-        parts.append(part)
-        text = text[split_index:].lstrip('\n')  # Удаляем начальные переносы строк для следующей части
-    if text:
-        parts.append(text)
-    return parts
+    title = news.get("title", "Без заголовка")
+    text_content = news.get("text", "Нет содержания")
+    image = news.get("image")  # Ожидается URL изображения
+    url = news.get("url")  # Ссылка на источник
 
+    # Формирование ссылки на источник
+    if url:
+        source_text = f'<a href="{url}">Источник</a>'
+        read_more_link = f'\n\n<a href="{url}">Далее...</a>'
+    else:
+        source_text = ""
+        read_more_link = ""
 
-async def publish_news():
-    loop = asyncio.get_event_loop()
+    # Объединяем заголовок и текст
+    full_text = f"<b>{title}</b>\n\n{text_content}\n\n{source_text}"
+
+    # Проверяем длину текста
+    if len(full_text) > max_news_length:
+        # Обрезаем текст по последнему вмещающемуся предложению
+        allowed_length = max_news_length - len(read_more_link)
+        truncated_text = truncate_text(text_content, allowed_length - len(f"<b>{title}</b>\n\n"))
+        full_text = f"<b>{title}</b>\n\n{truncated_text}{read_more_link}"
+
     try:
+        # Отправляем сообщение
+        if image:
+            try:
+                await bot.send_photo(
+                    chat_id=CHANNEL_ID,
+                    photo=image,
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                error_message = str(e).lower()
+                if "wrong file identifier" in error_message or "http url specified" in error_message:
+                    logger.error(f"Ошибка при отправке изображения для новости '{title}': {e}")
+                    logger.info(f"Публикуем новость '{title}' без изображения.")
+                    # Отправляем новость без изображения
+                    await bot.send_message(
+                        chat_id=CHANNEL_ID,
+                        text=full_text,
+                        parse_mode='HTML'
+                    )
+                else:
+                    # Если ошибка не связана с изображением, повторно выбрасываем исключение
+                    raise e
+        await bot.send_message(
+            chat_id=CHANNEL_ID,
+            text=full_text,
+            parse_mode='HTML'
+        )
+
+        # Обновление поля published на True после успешной отправки
+        collection.update_one(
+            {"_id": news["_id"]},
+            {"$set": {"published": True}}
+        )
+
+        logger.info(f"Новость '{title}' опубликована.")
+    except Exception as e:
+        logger.error(f"Ошибка при публикации новости '{title}': {e}")
+
+
+async def scheduled():
+    while True:
+        # Загружаем настройки из базы данных
         config = config_collection.find_one({"_id": "bot_config"})
-        news_per_hour = config.get('news_per_hour', 5)  # Значение по умолчанию 5
-        # Выполнение блокирующего вызова в отдельном потоке
-        new_news = await loop.run_in_executor(None, lambda: list(collection.find({"published": False})))
+        news_per_interval = config.get('news_per_hour', 5)
+        publish_interval = config.get('publish_interval', 3600)
 
-        news_to_publish = new_news[:news_per_hour] if len(new_news) >= news_per_hour else new_news
+        if news_per_interval <= 0 or publish_interval <= 0:
+            logger.warning(
+                "Лимит новостей или интервал публикации установлен в 0 или меньше. Ждем 60 секунд перед повторной проверкой.")
+            await asyncio.sleep(60)
+            continue
 
+        # Вычисляем интервал между публикациями
+        interval_between_news = publish_interval / news_per_interval
+
+        # Сбрасываем счетчик опубликованных новостей
         published_count = 0
 
-        if news_to_publish:
-            for news in news_to_publish:
-                # Получение полей новости
-                title = news.get("title", "Без заголовка")
-                text_content = news.get("text", "Нет содержания")
-                image = news.get("image")  # Ожидается URL изображения
-                url = news.get("url")  # Ссылка на источник
+        # Время начала цикла
+        cycle_start_time = datetime.utcnow()
 
-                # Формирование ссылки на источник
-                if url:
-                    source_text = hlink("Источник", url)
-                else:
-                    source_text = ""
-
-                # Формирование полного текста сообщения
-                message_text = f"<b>{title}</b>\n\n{text_content}\n\n{source_text}"
-
-                try:
-                    # Если изображение присутствует, пытаемся отправить его первым
-                    if image:
-                        try:
-                            await bot.send_photo(
-                                chat_id=CHANNEL_ID,
-                                photo=image,
-                                caption=f"<b>{title}</b>",
-                                parse_mode=ParseMode.HTML  # Используем HTML-разметку
-                            )
-                            # Отправляем оставшийся текст (text + source)
-                            remaining_text = f"{text_content}\n\n{source_text}"
-                            if len(remaining_text) > MAX_MESSAGE_LENGTH:
-                                message_parts = split_text(remaining_text, MAX_MESSAGE_LENGTH)
-                                for part in message_parts:
-                                    await bot.send_message(
-                                        chat_id=CHANNEL_ID,
-                                        text=part,
-                                        parse_mode=ParseMode.HTML  # Используем HTML-разметку
-                                    )
-                            else:
-                                await bot.send_message(
-                                    chat_id=CHANNEL_ID,
-                                    text=remaining_text,
-                                    parse_mode=ParseMode.HTML  # Используем HTML-разметку
-                                )
-                        except Exception as e:
-                            error_message = str(e).lower()
-                            if "wrong file identifier" in error_message or "http url" in error_message:
-                                logger.error(f"Ошибка при отправке изображения для новости '{title}': {e}")
-                                logger.info(f"Публикуем новость '{title}' без изображения.")
-                                # Публикуем текст без изображения
-                                if len(message_text) > MAX_MESSAGE_LENGTH:
-                                    message_parts = split_text(message_text, MAX_MESSAGE_LENGTH)
-                                    for part in message_parts:
-                                        await bot.send_message(
-                                            chat_id=CHANNEL_ID,
-                                            text=part,
-                                            parse_mode=ParseMode.HTML
-                                        )
-                                else:
-                                    await bot.send_message(
-                                        chat_id=CHANNEL_ID,
-                                        text=message_text,
-                                        parse_mode=ParseMode.HTML
-                                    )
-                            else:
-                                # Если ошибка не связана с изображением, повторно выбрасываем исключение
-                                raise e
-                    else:
-                        # Если изображения нет, отправляем весь текст
-                        if len(message_text) > MAX_MESSAGE_LENGTH:
-                            message_parts = split_text(message_text, MAX_MESSAGE_LENGTH)
-                            for part in message_parts:
-                                await bot.send_message(
-                                    chat_id=CHANNEL_ID,
-                                    text=part,
-                                    parse_mode=ParseMode.HTML  # Используем HTML-разметку
-                                )
-                        else:
-                            await bot.send_message(
-                                chat_id=CHANNEL_ID,
-                                text=message_text,
-                                parse_mode=ParseMode.HTML  # Используем HTML-разметку
-                            )
-
-                    # Обновление поля published на True после успешной отправки
-                    await loop.run_in_executor(
-                        None,
-                        lambda: collection.update_one(
-                            {"_id": news["_id"]},
-                            {"$set": {"published": True}}
-                        )
-                    )
-
-                    logger.info(f"Новость '{title}' опубликована.")
-                except Exception as e:
-                    # Проверка конкретной ошибки о длине сообщения
-                    error_message = str(e).lower()
-                    if "message is too long" in error_message:
-                        logger.warning(f"Новость '{title}' слишком длинная и будет разбита на части.")
-                        # Разбиваем сообщение на части
-                        message_parts = split_text(message_text, MAX_MESSAGE_LENGTH)
-                        for part in message_parts:
-                            try:
-                                await bot.send_message(
-                                    chat_id=CHANNEL_ID,
-                                    text=part,
-                                    parse_mode=ParseMode.HTML  # Используем HTML-разметку
-                                )
-                            except Exception as send_error:
-                                logger.error(f"Ошибка при отправке части сообщения: {send_error}")
-                        # Обновляем поле published после успешной отправки всех частей
-                        await loop.run_in_executor(
-                            None,
-                            lambda: collection.update_one(
-                                {"_id": news["_id"]},
-                                {"$set": {"published": True}}
-                            )
-                        )
-                        logger.info(f"Новость '{title}' опубликована частями.")
-                    else:
-                        logger.error(f"Ошибка при публикации новости '{title}': {e}")
-
+        # Публикуем новости с заданным интервалом
+        while published_count < news_per_interval:
+            # Получаем следующую новость для публикации
+            news = collection.find_one({"published": False})
+            if news:
+                await publish_single_news(news)
                 published_count += 1
+            else:
+                # Нет больше новостей для публикации
+                logger.info("Нет больше новостей для публикации.")
+                break
 
+            # Ждем интервал между публикациями
+            await asyncio.sleep(interval_between_news)
+
+        # Записываем статистику
         stats_collection.insert_one({
             "timestamp": datetime.utcnow(),
             "sent_count": published_count,
             "channel_id": CHANNEL_ID
         })
-    except PyMongoError as e:
-        logger.error(f"Ошибка при доступе к MongoDB: {e}")
 
-
-async def scheduled(publish_interval: int):
-    while True:
-        await publish_news()
-        await asyncio.sleep(publish_interval)
+        # Ждем до следующего цикла
+        time_passed = (datetime.utcnow() - cycle_start_time).total_seconds()
+        time_to_wait = publish_interval - time_passed
+        if time_to_wait > 0:
+            logger.info(f"Ждем {time_to_wait} секунд до следующего цикла публикации.")
+            await asyncio.sleep(time_to_wait)
 
 
 @dp.message(Command("start"))
@@ -427,6 +394,73 @@ async def process_source_callback(callback_query: CallbackQuery, callback_data: 
     await callback_query.message.edit_reply_markup(reply_markup=keyboard)
 
 
+class SetPublishIntervalState(StatesGroup):
+    waiting_for_interval = State()
+
+
+@dp.message(Command("set_publish_interval"))
+async def set_publish_interval_command(message: Message, state: FSMContext):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.reply("У вас нет прав для выполнения этой команды.")
+        return
+
+    await message.reply("Пожалуйста, введите интервал публикации в секундах:")
+    await state.set_state(SetPublishIntervalState.waiting_for_interval)
+
+
+@dp.message(SetPublishIntervalState.waiting_for_interval)
+async def process_publish_interval(message: Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.reply("Пожалуйста, введите корректное число (интервал в секундах).")
+        return
+
+    publish_interval = int(message.text)
+    if publish_interval <= 0:
+        await message.reply("Интервал публикации должен быть больше нуля.")
+        return
+    config_collection.update_one(
+        {"_id": "bot_config"},
+        {"$set": {"publish_interval": publish_interval}},
+        upsert=True
+    )
+    await message.reply(f"Интервал публикации установлен на {publish_interval} секунд.")
+    await state.clear()
+
+
+class SetMaxNewsLengthState(StatesGroup):
+    waiting_for_length = State()
+
+
+@dp.message(Command("set_max_news_length"))
+async def set_max_news_length_command(message: Message, state: FSMContext):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.reply("У вас нет прав для выполнения этой команды.")
+        return
+
+    await message.reply("Пожалуйста, введите максимальную длину текста новости (в символах):")
+    await state.set_state(SetMaxNewsLengthState.waiting_for_length)
+
+
+@dp.message(SetMaxNewsLengthState.waiting_for_length)
+async def process_max_news_length(message: Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.reply("Пожалуйста, введите корректное число.")
+        return
+
+    max_news_length = int(message.text)
+    if max_news_length <= 0 or max_news_length > 4096:
+        await message.reply("Длина новости должна быть больше 0 и меньше или равна 4096 символам.")
+        return
+
+    config_collection.update_one(
+        {"_id": "bot_config"},
+        {"$set": {"max_news_length": max_news_length}},
+        upsert=True
+    )
+    await message.reply(f"Максимальная длина текста новости установлена на {max_news_length} символов.")
+    await state.clear()
+
+
 @dp.message(Command("set_news_per_hour"))
 async def set_news_per_hour_command(message: Message):
     if message.from_user.id not in ALLOWED_USERS:
@@ -467,8 +501,7 @@ async def stats_command(message: Message):
 
 async def main():
     # Запуск фоновой задачи
-    publish_interval = 10  # 600 секунд = 10 минут
-    asyncio.create_task(scheduled(publish_interval))
+    asyncio.create_task(scheduled())
 
     # Запуск бота
     try:
