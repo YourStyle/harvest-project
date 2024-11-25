@@ -146,9 +146,14 @@ async def publish_single_news(news):
                     photo=image,
                     parse_mode='HTML'
                 )
+                await bot.send_message(
+                    chat_id=CHANNEL_ID,
+                    text=full_text,
+                    parse_mode='HTML'
+                )
             except Exception as e:
                 error_message = str(e).lower()
-                if "wrong file identifier" in error_message or "http url specified" in error_message:
+                if "http url content" in error_message or "wrong file identifier" in error_message or "http url specified" in error_message:
                     logger.error(f"Ошибка при отправке изображения для новости '{title}': {e}")
                     logger.info(f"Публикуем новость '{title}' без изображения.")
                     # Отправляем новость без изображения
@@ -160,11 +165,12 @@ async def publish_single_news(news):
                 else:
                     # Если ошибка не связана с изображением, повторно выбрасываем исключение
                     raise e
-        await bot.send_message(
-            chat_id=CHANNEL_ID,
-            text=full_text,
-            parse_mode='HTML'
-        )
+        else:
+            await bot.send_message(
+                chat_id=CHANNEL_ID,
+                text=full_text,
+                parse_mode='HTML'
+            )
 
         # Обновление поля published на True после успешной отправки
         collection.update_one(
@@ -183,6 +189,9 @@ async def scheduled():
         config = config_collection.find_one({"_id": "bot_config"})
         news_per_interval = config.get('news_per_hour', 5)
         publish_interval = config.get('publish_interval', 3600)
+        max_news_length = config.get('max_news_length', MAX_MESSAGE_LENGTH)
+        # Получаем счетчик опубликованных новостей
+        published_count = 0  # Обнуляем локальный счетчик
 
         if news_per_interval <= 0 or publish_interval <= 0:
             logger.warning(
@@ -190,11 +199,14 @@ async def scheduled():
             await asyncio.sleep(60)
             continue
 
+        # Сбрасываем счетчик опубликованных новостей в конфиге
+        config_collection.update_one(
+            {"_id": "bot_config"},
+            {"$set": {"published_count": 0}}
+        )
+
         # Вычисляем интервал между публикациями
         interval_between_news = publish_interval / news_per_interval
-
-        # Сбрасываем счетчик опубликованных новостей
-        published_count = 0
 
         # Время начала цикла
         cycle_start_time = datetime.utcnow()
@@ -206,6 +218,12 @@ async def scheduled():
             if news:
                 await publish_single_news(news)
                 published_count += 1
+
+                # Обновляем published_count в конфиге
+                config_collection.update_one(
+                    {"_id": "bot_config"},
+                    {"$set": {"published_count": published_count}}
+                )
             else:
                 # Нет больше новостей для публикации
                 logger.info("Нет больше новостей для публикации.")
@@ -213,13 +231,6 @@ async def scheduled():
 
             # Ждем интервал между публикациями
             await asyncio.sleep(interval_between_news)
-
-        # Записываем статистику
-        stats_collection.insert_one({
-            "timestamp": datetime.utcnow(),
-            "sent_count": published_count,
-            "channel_id": CHANNEL_ID
-        })
 
         # Ждем до следующего цикла
         time_passed = (datetime.utcnow() - cycle_start_time).total_seconds()
