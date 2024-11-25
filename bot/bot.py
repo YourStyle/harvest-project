@@ -216,14 +216,24 @@ async def scheduled():
             # Получаем следующую новость для публикации
             news = collection.find_one({"published": False})
             if news:
-                await publish_single_news(news)
-                published_count += 1
+                try:
+                    await publish_single_news(news)
+                    published_count += 1
 
-                # Обновляем published_count в конфиге
-                config_collection.update_one(
-                    {"_id": "bot_config"},
-                    {"$set": {"published_count": published_count}}
-                )
+                    # Обновляем published_count в конфиге
+                    config_collection.update_one(
+                        {"_id": "bot_config"},
+                        {"$set": {"published_count": published_count}}
+                    )
+                except Exception as e:
+                    logger.info(f"Не смогли опубликовать новость. Причина: {e}")
+                    published_count += 1
+
+                    # Обновляем published_count в конфиге
+                    config_collection.update_one(
+                        {"_id": "bot_config"},
+                        {"$set": {"published_count": published_count}}
+                    )
             else:
                 # Нет больше новостей для публикации
                 logger.info("Нет больше новостей для публикации.")
