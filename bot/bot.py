@@ -62,7 +62,7 @@ def truncate_text(news_text, max_length):
         return news_text
 
     # Находим позиции возможных окончаний предложений
-    sentence_endings = [m.end() for m in re.finditer(r'[.,;]', news_text)]
+    sentence_endings = [m.end() for m in re.finditer(r'[.;]', news_text)]
     # Оставляем только те окончания, которые находятся в пределах max_length
     valid_endings = [pos for pos in sentence_endings if pos <= max_length]
 
@@ -149,7 +149,8 @@ async def publish_single_news(news):
                 await bot.send_message(
                     chat_id=CHANNEL_ID,
                     text=full_text,
-                    parse_mode='HTML'
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
                 )
             except Exception as e:
                 error_message = str(e).lower()
@@ -160,7 +161,8 @@ async def publish_single_news(news):
                     await bot.send_message(
                         chat_id=CHANNEL_ID,
                         text=full_text,
-                        parse_mode='HTML'
+                        parse_mode='HTML',
+                        disable_web_page_preview=True
                     )
                 else:
                     # Если ошибка не связана с изображением, повторно выбрасываем исключение
@@ -169,7 +171,8 @@ async def publish_single_news(news):
             await bot.send_message(
                 chat_id=CHANNEL_ID,
                 text=full_text,
-                parse_mode='HTML'
+                parse_mode='HTML',
+                disable_web_page_preview=True
             )
 
         # Обновление поля published на True после успешной отправки
