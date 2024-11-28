@@ -2,18 +2,17 @@ import asyncio
 import re
 from datetime import datetime, timedelta
 
+from aiogram import BaseMiddleware
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
-from aiogram.enums import ParseMode
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery, Update
 from aiogram.filters.callback_data import CallbackData
 from bson.objectid import ObjectId
+from aiogram.fsm.storage.memory import MemoryStorage
 
 import pymongo
-from pymongo.errors import PyMongoError
-from aiogram.utils.markdown import text, bold, hlink
 import logging
 
 BOT_TOKEN = "7728371504:AAE9OKYCW5MVBYPB-nNJn60BZTk3viOxlzA"
@@ -33,13 +32,15 @@ db = mongo_client[DATABASE_NAME]
 collection = db[COLLECTION_NAME]
 sources_collection = db['sources']
 keywords_collection = db['keywords']
+bans_collection = db['bans']
 config_collection = db['config']
 
 stats_collection = db['statistics']
 
 # Инициализация бота и диспетчера
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
+storage = MemoryStorage()
+dp = Dispatcher(storage=storage)
 
 # Максимальная длина сообщения Telegram
 MAX_MESSAGE_LENGTH = 4096
@@ -56,6 +57,8 @@ config_collection.update_one(
     {"$setOnInsert": default_config},
     upsert=True
 )
+
+ALLOWED_USERS = [416546809, 282247284]  # Замените на список ID разрешенных пользователей
 
 
 def truncate_text(news_text, max_length):
@@ -76,110 +79,6 @@ def truncate_text(news_text, max_length):
         truncated = news_text[:max_length]
 
     return truncated.strip()
-
-
-# Определение класса состояний для FSM
-class SetNewsPerHourState(StatesGroup):
-    waiting_for_number = State()
-
-
-# Обработчик команды /set_news_per_hour
-@dp.message(Command("set_news_per_hour"))
-async def set_news_per_hour_command(message: Message, state: FSMContext):
-    if message.from_user.id not in ALLOWED_USERS:
-        await message.reply("У вас нет прав для выполнения этой команды.")
-        return
-
-    await message.reply("Пожалуйста, введите количество новостей в час:")
-    await state.set_state(SetNewsPerHourState.waiting_for_number)
-
-
-# Обработчик ввода количества новостей в час
-@dp.message(SetNewsPerHourState.waiting_for_number)
-async def process_news_per_hour(message: Message, state: FSMContext):
-    if not message.text.isdigit():
-        await message.reply("Пожалуйста, введите корректное число.")
-        return
-
-    news_per_hour = int(message.text)
-    config_collection.update_one(
-        {"_id": "bot_config"},
-        {"$set": {"news_per_hour": news_per_hour}},
-        upsert=True
-    )
-    await message.reply(f"Количество новостей в час установлено на {news_per_hour}.")
-    await state.clear()
-
-
-async def publish_single_news(news):
-    config = config_collection.find_one({"_id": "bot_config"})
-    max_news_length = config.get('max_news_length', 4096)
-
-    title = news.get("title", "Без заголовка")
-    text_content = news.get("text", "Нет содержания")
-    image = news.get("image")  # Ожидается URL изображения
-    url = news.get("url")  # Ссылка на источник
-
-    # Формирование ссылки на источник
-    if url:
-        source_text = f'<a href="{url}">Источник</a>'
-        read_more_link = f'\n\n<a href="{url}">Далее...</a>'
-    else:
-        source_text = ""
-        read_more_link = ""
-
-    # Объединяем заголовок и текст
-    full_text = f"<b>{title}</b>\n\n{text_content}\n\n{source_text}"
-
-    # Проверяем длину текста
-    if len(full_text) > max_news_length:
-        # Обрезаем текст по последнему вмещающемуся предложению
-        allowed_length = max_news_length - len(read_more_link)
-        truncated_text = truncate_text(text_content, allowed_length - len(f"<b>{title}</b>\n\n"))
-        full_text = f"<b>{title}</b>\n\n{truncated_text}{read_more_link}"
-
-    try:
-        # Отправляем сообщение
-        if image:
-            try:
-                await bot.send_message(
-                    chat_id=CHANNEL_ID,
-                    text=full_text,
-                    parse_mode='HTML',
-                    disable_web_page_preview=True
-                )
-            except Exception as e:
-                error_message = str(e).lower()
-                if "http url content" in error_message or "wrong file identifier" in error_message or "http url specified" in error_message:
-                    logger.error(f"Ошибка при отправке изображения для новости '{title}': {e}")
-                    logger.info(f"Публикуем новость '{title}' без изображения.")
-                    # Отправляем новость без изображения
-                    await bot.send_message(
-                        chat_id=CHANNEL_ID,
-                        text=full_text,
-                        parse_mode='HTML',
-                        disable_web_page_preview=True
-                    )
-                else:
-                    # Если ошибка не связана с изображением, повторно выбрасываем исключение
-                    raise e
-        else:
-            await bot.send_message(
-                chat_id=CHANNEL_ID,
-                text=full_text,
-                parse_mode='HTML',
-                disable_web_page_preview=True
-            )
-
-        # Обновление поля published на True после успешной отправки
-        collection.update_one(
-            {"_id": news["_id"]},
-            {"$set": {"published": True}}
-        )
-
-        logger.info(f"Новость '{title}' опубликована.")
-    except Exception as e:
-        logger.error(f"Ошибка при публикации новости '{title}': {e}")
 
 
 async def scheduled():
@@ -249,12 +148,117 @@ async def scheduled():
             await asyncio.sleep(time_to_wait)
 
 
+async def publish_single_news(news):
+    config = config_collection.find_one({"_id": "bot_config"})
+    max_news_length = config.get('max_news_length', 4096)
+
+    title = news.get("title", "Без заголовка")
+    text_content = news.get("text", "Нет содержания")
+    image = news.get("image")  # Ожидается URL изображения
+    url = news.get("url")  # Ссылка на источник
+
+    # Формирование ссылки на источник
+    if url:
+        source_text = f'<a href="{url}">Источник</a>'
+        read_more_link = f'\n\n<a href="{url}">Далее...</a>'
+    else:
+        source_text = ""
+        read_more_link = ""
+
+    tags = " ".join(f"#{word}" for word in list(news.get("found_keywords")))
+
+    # Объединяем заголовок и текст
+    full_text = f"<b>{title}</b>\n\n{tags}\n{text_content}\n\n{source_text}"
+
+    # Проверяем длину текста
+    if len(full_text) > max_news_length:
+        # Обрезаем текст по последнему вмещающемуся предложению
+        allowed_length = max_news_length - len(read_more_link)
+        truncated_text = truncate_text(text_content, allowed_length - len(f"<b>{title}</b>\n\n"))
+        full_text = f"<b>{title}</b>\n\n{tags}\n{truncated_text}{read_more_link}"
+
+    try:
+        # Отправляем сообщение
+        if image:
+            try:
+                await bot.send_message(
+                    chat_id=CHANNEL_ID,
+                    text=full_text,
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
+            except Exception as e:
+                error_message = str(e).lower()
+                if "http url content" in error_message or "wrong file identifier" in error_message or "http url specified" in error_message:
+                    logger.error(f"Ошибка при отправке изображения для новости '{title}': {e}")
+                    logger.info(f"Публикуем новость '{title}' без изображения.")
+                    # Отправляем новость без изображения
+                    await bot.send_message(
+                        chat_id=CHANNEL_ID,
+                        text=full_text,
+                        parse_mode='HTML',
+                        disable_web_page_preview=True
+                    )
+                else:
+                    # Если ошибка не связана с изображением, повторно выбрасываем исключение
+                    raise e
+        else:
+            await bot.send_message(
+                chat_id=CHANNEL_ID,
+                text=full_text,
+                parse_mode='HTML',
+                disable_web_page_preview=True
+            )
+
+        # Обновление поля published на True после успешной отправки
+        collection.update_one(
+            {"_id": news["_id"]},
+            {"$set": {"published": True}}
+        )
+
+        logger.info(f"Новость '{title}' опубликована.")
+    except Exception as e:
+        logger.error(f"Ошибка при публикации новости '{title}': {e}")
+
+
+
+
+# Определение класса состояний для FSM
+class SetNewsPerHourState(StatesGroup):
+    waiting_for_number = State()
+
+
+# Обработчик команды /set_news_per_hour
+@dp.message(Command("set_news_per_hour"))
+async def set_news_per_hour_command(message: Message, state: FSMContext):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.reply("У вас нет прав для выполнения этой команды.")
+        return
+
+    await message.reply("Пожалуйста, введите количество новостей в час:")
+    await state.set_state(SetNewsPerHourState.waiting_for_number)
+
+
+# Обработчик ввода количества новостей в час
+@dp.message(SetNewsPerHourState.waiting_for_number)
+async def process_news_per_hour(message: Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.reply("Пожалуйста, введите корректное число.")
+        return
+
+    news_per_hour = int(message.text)
+    config_collection.update_one(
+        {"_id": "bot_config"},
+        {"$set": {"news_per_hour": news_per_hour}},
+        upsert=True
+    )
+    await message.reply(f"Количество новостей в час установлено на {news_per_hour}.")
+    await state.clear()
+
+
 @dp.message(Command("start"))
 async def cmd_start(message):
     await message.reply("Бот запущен и будет публиковать новости каждые 10 минут.")
-
-
-ALLOWED_USERS = [416546809, 282247284]  # Замените на список ID разрешенных пользователей
 
 
 class AddSourceStates(StatesGroup):
@@ -274,6 +278,33 @@ async def add_source_command(message: Message, state: FSMContext):
         "Вы можете отправить один или несколько источников, каждый в новой строке."
     )
     await state.set_state(AddSourceStates.waiting_for_sources)
+
+@dp.message(Command("add_keywords"))
+async def add_keywords_command(message: Message, state: FSMContext):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.reply("У вас нет прав для выполнения этой команды.")
+        return
+
+    await message.reply(
+        "Пожалуйста, отправьте список ключевых слов:\n"
+        "слово\n\n"
+        "Вы можете отправить один или несколько ключевых слов, каждый в новой строке."
+    )
+    await state.set_state(AddKeywordsStates.waiting_for_keywords)
+
+
+@dp.message(Command("add_banwords"))
+async def add_banwords_command(message: Message, state: FSMContext):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.reply("У вас нет прав для выполнения этой команды.")
+        return
+
+    await message.reply(
+        "Пожалуйста, отправьте список ключевых слов:\n"
+        "слово\n\n"
+        "Вы можете отправить один или несколько ключевых слов, каждый в новой строке."
+    )
+    await state.set_state(AddBanStates.waiting_for_bans)
 
 
 # Обработка введенных источников
@@ -416,23 +447,12 @@ async def process_source_callback(callback_query: CallbackQuery, callback_data: 
 class AddKeywordsStates(StatesGroup):
     waiting_for_keywords = State()
 
-@dp.message(Command("add_keywords"))
-async def add_keywords_command(message: Message, state: FSMContext):
-    if message.from_user.id not in ALLOWED_USERS:
-        await message.reply("У вас нет прав для выполнения этой команды.")
-        return
 
-    await message.reply(
-        "Пожалуйста, отправьте список ключевых слов:\n"
-        "слово\n\n"
-        "Вы можете отправить один или несколько ключевых слов, каждый в новой строке."
-    )
-    await state.set_state(AddKeywordsStates.waiting_for_keywords)
 
 
 # Обработка введенных источников
 @dp.message(AddKeywordsStates.waiting_for_keywords)
-async def process_sources(message: Message, state: FSMContext):
+async def process_keywords(message: Message, state: FSMContext):
     sources_text = message.text
 
     # Разбиваем текст на строки
@@ -441,7 +461,6 @@ async def process_sources(message: Message, state: FSMContext):
     # Списки для успешных и неуспешных добавлений
     added_keywords = []
     failed_keywords = []
-
 
     for line in lines:
         line = line.strip()
@@ -457,10 +476,10 @@ async def process_sources(message: Message, state: FSMContext):
     # Формируем ответное сообщение
     response_messages = []
     if added_keywords:
-        response_messages.append("Следующие источники были добавлены и активированы:")
+        response_messages.append("Следующие ключевые слова были добавлены:")
         response_messages.extend(added_keywords)
     if failed_keywords:
-        response_messages.append("\nНе удалось распознать следующие источники:")
+        response_messages.append("\nНе удалось распознать следующие ключевые слова:")
         response_messages.extend(failed_keywords)
 
     await message.reply('\n'.join(response_messages))
@@ -485,35 +504,107 @@ async def manage_keywords(message: Message):
         return
 
     for keyword in keywords:
-        source_id = str(keywords['_id'])
+        keyword_id = str(keyword['_id'])
         keywords_text = keyword['keyword']
 
         buttons = [[
             InlineKeyboardButton(
                 text='🗑',
-                callback_data=SourceCallback(action='delete', source_id=source_id).pack()
+                callback_data=KeywordCallback(action='delete', keyword_id=keyword_id).pack()
             )
         ]
         ]
         keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
 
-        await message.reply(f"{keyword}", reply_markup=keyboard)
+        await message.reply(f"{keywords_text}", reply_markup=keyboard)
 
 
-@dp.callback_query(KeywordCallback.filter())
-async def process_source_callback(callback_query: CallbackQuery, callback_data: dict):
+
+class AddBanStates(StatesGroup):
+    waiting_for_bans = State()
+
+# Обработка введенных банов
+@dp.message(AddBanStates.waiting_for_bans)
+async def process_bans(message: Message, state: FSMContext):
+    bans_text = message.text
+
+    # Разбиваем текст на строки
+    lines = bans_text.strip().split('\n')
+
+    # Списки для успешных и неуспешных добавлений
+    added_bans = []
+    failed_bans = []
+
+    for line in lines:
+        line = line.strip()
+
+        existing_keyword = bans_collection.find_one({'keyword': line})
+        if existing_keyword:
+            failed_bans.append(f"{line} - уже существует")
+            continue
+        # Добавляем источник в базу данных
+        bans_collection.insert_one({'keyword': line})
+        added_bans.append(f"{line}")
+
+    # Формируем ответное сообщение
+    response_messages = []
+    if added_bans:
+        response_messages.append("Следующие исключения были добавлены:")
+        response_messages.extend(added_bans)
+    if failed_bans:
+        response_messages.append("\nНе удалось распознать следующие исключения:")
+        response_messages.extend(failed_bans)
+
+    await message.reply('\n'.join(response_messages))
+    # Сбрасываем состояние
+    await state.clear()
+
+
+class BanCallback(CallbackData, prefix="ban"):
+    action: str
+    ban_id: str
+
+
+@dp.message(Command("manage_bans"))
+async def manage_bans(message: Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.reply("У вас нет прав для выполнения этой команды.")
+        return
+
+    bans = list(bans_collection.find())
+    if not bans:
+        await message.reply("Список исключений пуст.")
+        return
+
+    for ban in bans:
+        ban_id = str(ban['_id'])
+        ban_text = ban['keyword']
+
+        buttons = [[
+            InlineKeyboardButton(
+                text='🗑',
+                callback_data=BanCallback(action='delete', ban_id=ban_id).pack()
+            )
+        ]
+        ]
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+        await message.reply(f"{ban_text}", reply_markup=keyboard)
+
+@dp.callback_query(BanCallback.filter())
+async def process_ban_callback(callback_query: CallbackQuery, callback_data: dict):
     if callback_query.from_user.id not in ALLOWED_USERS:
         await callback_query.answer("У вас нет прав для выполнения этого действия.", show_alert=True)
         return
-    keyword_id = callback_data.keyword_id
-    keyword = keywords_collection.find_one({'_id': ObjectId(keyword_id)})
+    ban_id = callback_data.ban_id
+    ban = bans_collection.find_one({'_id': ObjectId(ban_id)})
 
-    if not keyword:
-        await callback_query.answer("Источник не найден.", show_alert=True)
+    if not ban:
+        await callback_query.answer("Ключевое слово не найдено.", show_alert=True)
         return
-    keyword_text = keyword['keyword']
-    sources_collection.delete_one({'_id': ObjectId(keyword_id)})
-    await callback_query.answer(f"Ключевое слово '{keyword_text}' удалено.", show_alert=True)
+    keyword_text = ban['keyword']
+    keywords_collection.delete_one({'_id': ObjectId(ban_id)})
+    await callback_query.answer(f"Исключение '{keyword_text}' удалено.", show_alert=True)
     await callback_query.message.delete()
 
 
