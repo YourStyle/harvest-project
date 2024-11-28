@@ -32,6 +32,7 @@ mongo_client = pymongo.MongoClient("194.87.186.63", username='Admin', password='
 db = mongo_client[DATABASE_NAME]
 collection = db[COLLECTION_NAME]
 sources_collection = db['sources']
+keywords_collection = db['keywords']
 config_collection = db['config']
 
 stats_collection = db['statistics']
@@ -141,11 +142,6 @@ async def publish_single_news(news):
         # Отправляем сообщение
         if image:
             try:
-                await bot.send_photo(
-                    chat_id=CHANNEL_ID,
-                    photo=image,
-                    parse_mode='HTML'
-                )
                 await bot.send_message(
                     chat_id=CHANNEL_ID,
                     text=full_text,
@@ -279,9 +275,8 @@ async def add_source_command(message: Message, state: FSMContext):
     )
     await state.set_state(AddSourceStates.waiting_for_sources)
 
-    # Обработка введенных источников
 
-
+# Обработка введенных источников
 @dp.message(AddSourceStates.waiting_for_sources)
 async def process_sources(message: Message, state: FSMContext):
     sources_text = message.text
@@ -416,6 +411,110 @@ async def process_source_callback(callback_query: CallbackQuery, callback_data: 
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
 
     await callback_query.message.edit_reply_markup(reply_markup=keyboard)
+
+
+class AddKeywordsStates(StatesGroup):
+    waiting_for_keywords = State()
+
+@dp.message(Command("add_keywords"))
+async def add_keywords_command(message: Message, state: FSMContext):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.reply("У вас нет прав для выполнения этой команды.")
+        return
+
+    await message.reply(
+        "Пожалуйста, отправьте список ключевых слов:\n"
+        "слово\n\n"
+        "Вы можете отправить один или несколько ключевых слов, каждый в новой строке."
+    )
+    await state.set_state(AddKeywordsStates.waiting_for_keywords)
+
+
+# Обработка введенных источников
+@dp.message(AddKeywordsStates.waiting_for_keywords)
+async def process_sources(message: Message, state: FSMContext):
+    sources_text = message.text
+
+    # Разбиваем текст на строки
+    lines = sources_text.strip().split('\n')
+
+    # Списки для успешных и неуспешных добавлений
+    added_keywords = []
+    failed_keywords = []
+
+
+    for line in lines:
+        line = line.strip()
+
+        existing_keyword = keywords_collection.find_one({'keyword': line})
+        if existing_keyword:
+            failed_keywords.append(f"{line} - уже существует")
+            continue
+        # Добавляем источник в базу данных
+        keywords_collection.insert_one({'keyword': line})
+        added_keywords.append(f"{line}")
+
+    # Формируем ответное сообщение
+    response_messages = []
+    if added_keywords:
+        response_messages.append("Следующие источники были добавлены и активированы:")
+        response_messages.extend(added_keywords)
+    if failed_keywords:
+        response_messages.append("\nНе удалось распознать следующие источники:")
+        response_messages.extend(failed_keywords)
+
+    await message.reply('\n'.join(response_messages))
+    # Сбрасываем состояние
+    await state.clear()
+
+
+class KeywordCallback(CallbackData, prefix="keyword"):
+    action: str
+    keyword_id: str
+
+
+@dp.message(Command("manage_keywords"))
+async def manage_keywords(message: Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.reply("У вас нет прав для выполнения этой команды.")
+        return
+
+    keywords = list(keywords_collection.find())
+    if not keywords:
+        await message.reply("Список ключевых слов пуст.")
+        return
+
+    for keyword in keywords:
+        source_id = str(keywords['_id'])
+        keywords_text = keyword['keyword']
+
+        buttons = [[
+            InlineKeyboardButton(
+                text='🗑',
+                callback_data=SourceCallback(action='delete', source_id=source_id).pack()
+            )
+        ]
+        ]
+        keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+
+        await message.reply(f"{keyword}", reply_markup=keyboard)
+
+
+@dp.callback_query(KeywordCallback.filter())
+async def process_source_callback(callback_query: CallbackQuery, callback_data: dict):
+    if callback_query.from_user.id not in ALLOWED_USERS:
+        await callback_query.answer("У вас нет прав для выполнения этого действия.", show_alert=True)
+        return
+    keyword_id = callback_data.keyword_id
+    keyword = keywords_collection.find_one({'_id': ObjectId(keyword_id)})
+
+    if not keyword:
+        await callback_query.answer("Источник не найден.", show_alert=True)
+        return
+    keyword_text = keyword['keyword']
+    sources_collection.delete_one({'_id': ObjectId(keyword_id)})
+    await callback_query.answer(f"Ключевое слово '{keyword_text}' удалено.", show_alert=True)
+    await callback_query.message.delete()
 
 
 class SetPublishIntervalState(StatesGroup):
