@@ -159,7 +159,7 @@ async def publish_single_news(news):
     # Формирование ссылки на источник
     if url:
         source_text = f'<a href="{url}">Источник</a>'
-        read_more_link = f'\n\n<a href="{url}">Далее...</a>'
+        read_more_link = f'<a href="{url}">"{title}"</a>'
     else:
         source_text = ""
         read_more_link = ""
@@ -167,14 +167,14 @@ async def publish_single_news(news):
     tags = " ".join(f"#{word}" for word in list(news.get("found_keywords")))
 
     # Объединяем заголовок и текст
-    full_text = f"<b>{title}</b>\n\n{tags}\n{text_content}\n\n{source_text}"
+    full_text = f"<b>{title}</b>\n{text_content}\n\n{tags}\n\n{source_text}"
 
     # Проверяем длину текста
     if len(full_text) > max_news_length:
         # Обрезаем текст по последнему вмещающемуся предложению
         allowed_length = max_news_length - len(read_more_link)
         truncated_text = truncate_text(text_content, allowed_length - len(f"<b>{title}</b>\n\n"))
-        full_text = f"<b>{title}</b>\n\n{tags}\n{truncated_text}{read_more_link}"
+        full_text = f"<b>{read_more_link}</b>\n\n{truncated_text}\n\n{tags}"
 
     try:
         # Отправляем сообщение
