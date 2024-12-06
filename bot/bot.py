@@ -58,7 +58,7 @@ config_collection.update_one(
     upsert=True
 )
 
-ALLOWED_USERS = [416546809, 282247284]  # Замените на список ID разрешенных пользователей
+ALLOWED_USERS = [416546809, 282247284, 5257246969, 667847105,81209035]
 
 
 def truncate_text(news_text, max_length):
@@ -88,7 +88,6 @@ async def scheduled():
         news_per_interval = config.get('news_per_hour', 5)
         publish_interval = config.get('publish_interval', 3600)
         max_news_length = config.get('max_news_length', MAX_MESSAGE_LENGTH)
-        # Получаем счетчик опубликованных новостей
         published_count = 0  # Обнуляем локальный счетчик
 
         if news_per_interval <= 0 or publish_interval <= 0:
@@ -229,13 +228,13 @@ class SetNewsPerHourState(StatesGroup):
 
 
 # Обработчик команды /set_news_per_hour
-@dp.message(Command("set_news_per_hour"))
+@dp.message(Command("set_news_per_interval"))
 async def set_news_per_hour_command(message: Message, state: FSMContext):
     if message.from_user.id not in ALLOWED_USERS:
         await message.reply("У вас нет прав для выполнения этой команды.")
         return
 
-    await message.reply("Пожалуйста, введите количество новостей в час:")
+    await message.reply("Пожалуйста, введите количество новостей за интервал:")
     await state.set_state(SetNewsPerHourState.waiting_for_number)
 
 
@@ -300,7 +299,7 @@ async def add_banwords_command(message: Message, state: FSMContext):
         return
 
     await message.reply(
-        "Пожалуйста, отправьте список ключевых слов:\n"
+        "Пожалуйста, отправьте список исключений:\n"
         "слово\n\n"
         "Вы можете отправить один или несколько ключевых слов, каждый в новой строке."
     )
@@ -517,7 +516,6 @@ async def manage_keywords(message: Message):
         keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
 
         await message.reply(f"{keywords_text}", reply_markup=keyboard)
-
 
 
 class AddBanStates(StatesGroup):
