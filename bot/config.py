@@ -1,7 +1,34 @@
-import os
+import logging
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # Токен вашего бота
-CHANNEL_ID = os.getenv("CHANNEL_ID")  # ID вашего канала, например, -1001234567890
-MONGODB_URI = os.getenv("MONGODB_URI")  # URI для подключения к MongoDB
-DATABASE_NAME = os.getenv("DATABASE_NAME", "news_db")  # Название базы данных
-COLLECTION_NAME = os.getenv("COLLECTION_NAME", "news")  # Название коллекции
+BOT_TOKEN = "7728371504:AAE9OKYCW5MVBYPB-nNJn60BZTk3viOxlzA"
+CHANNEL_ID = "-1002370678576"
+
+MONGODB_HOST = "194.87.186.63"
+MONGODB_USER = "Admin"
+MONGODB_PASS = "PasswordForMongo63"
+MONGODB_DBNAME = "news_db"
+MONGODB_AUTH_DB = "admin"
+
+DATABASE_NAME = "news_db"
+COLLECTION_NAME = "articles"
+
+# Допустимые пользователи
+ALLOWED_USERS = [416546809, 282247284, 5257246969, 667847105, 81209035]
+
+# Логирование
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Настройки по умолчанию
+DEFAULT_CONFIG = {
+    "_id": "bot_config",
+    "news_per_hour": 5,
+    "publish_interval": 3600,
+    "max_news_length": 4096
+}
+
+CUSTOM_TITLE_SOURCES = {
+    # Ключ — это точное значение поля news["title"]
+    "Управление сельского хозяйства Липецкой области": "FIRST_SENTENCE",
+    # "Название другого источника": "FIRST_SENTENCE",
+}
