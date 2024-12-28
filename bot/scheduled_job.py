@@ -6,27 +6,11 @@ from datetime import datetime
 from config import CHANNEL_ID, logger
 from database import collection, config_collection
 
-from misc import get_effective_title
+from misc import get_effective_title, flexible_truncate_text_by_delimiters, remove_first_sentence_if_in_title, \
+    remove_publication_date_lines
 
 # либо передавать его в функцию scheduled как параметр
 MAX_MESSAGE_LENGTH = 4096  # fallback, если не найдёт в конфиге
-
-
-# Функция для обрезки текста
-def truncate_text(news_text, max_length):
-    if len(news_text) <= max_length:
-        return news_text
-
-    sentence_endings = [m.end() for m in re.finditer(r'[.;]', news_text)]
-    valid_endings = [pos for pos in sentence_endings if pos <= max_length]
-
-    if valid_endings:
-        cut_off = valid_endings[-1]
-        truncated = news_text[:cut_off]
-    else:
-        truncated = news_text[:max_length]
-
-    return truncated.strip()
 
 
 async def publish_single_news(news, bot):
@@ -35,6 +19,13 @@ async def publish_single_news(news, bot):
 
     title = get_effective_title(news)
     text_content = news.get("text", "Нет содержания")
+
+    # --- 1) Удаляем из текста первое предложение, если оно уже в заголовке ---
+    text_content = remove_first_sentence_if_in_title(text_content, title)
+
+    # --- 2) Удаляем "дату публикации", если она отдельной строкой в начале/конце ---
+    text_content = remove_publication_date_lines(text_content)
+
     image = news.get("image")  # URL изображения
     url = news.get("url")  # Ссылка на источник
 
@@ -47,17 +38,20 @@ async def publish_single_news(news, bot):
 
     tags = " ".join(f"#{word}" for word in list(news.get("found_keywords", [])))
 
-    full_text = f"<b>{title}</b>\n{text_content}\n\n{tags}\n\n{source_text}"
+    full_text = f"<b>{read_more_link}</b>\n{text_content}\n\n{tags}\n\n{source_text}"
 
     if len(full_text) > max_news_length:
-        # Обрезаем текст (учитываем ссылку)
-        allowed_length = max_news_length - len(read_more_link)
-        truncated_text = truncate_text(
-            text_content,
-            allowed_length - len(f"<b>{title}</b>\n\n")
-        )
-        full_text = f"<b>{read_more_link}</b>\n\n{truncated_text}\n\n{tags}"
+        overhead_text = f"<b>{read_more_link}</b>\n\n{tags}\n\n{source_text}"
+        overhead_length = len(overhead_text)
 
+        allowed_length_for_text = max_news_length - overhead_length
+        print(allowed_length_for_text)
+        if allowed_length_for_text < 1:
+            truncated_text = ""
+        else:
+            truncated_text = flexible_truncate_text_by_delimiters(text_content, allowed_length_for_text)
+
+        full_text = f"<b>{read_more_link}</b>\n\n{truncated_text}\n\n{tags}"
     try:
         # Публикуем
         if image:
