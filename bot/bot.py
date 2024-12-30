@@ -5,6 +5,7 @@ import asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
+from middlewares.reset_fsm_state import ResetFSMOnCommandMiddleware
 from config import BOT_TOKEN, logger
 from database import mongo_client  # чтобы потом закрыть при завершении
 from scheduled_job import scheduled
@@ -17,6 +18,7 @@ bot = Bot(token=BOT_TOKEN, parse_mode="HTML")
 async def main():
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(main_router)
+    dp.message.middleware(ResetFSMOnCommandMiddleware())
 
     # Запускаем фоновой таск
     asyncio.create_task(scheduled(bot))

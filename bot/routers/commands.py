@@ -5,16 +5,24 @@ from datetime import datetime, timedelta
 
 from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message
+from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 
 from config import ALLOWED_USERS, logger
-from database import config_collection, stats_collection
+from database import config_collection, stats_collection, sources_collection, keywords_collection, bans_collection
 from states import (
     SetNewsPerHourState,
     SetPublishIntervalState,
-    SetMaxNewsLengthState
+    SetMaxNewsLengthState,
+    AddSourceStates,
+    AddKeywordsStates,
+    AddBanStates
 )
+from .callbacks import KeywordCallback, BanCallback
+
+from routers.manage_sources import build_sources_page_keyboard, build_sources_page_text
+
+PER_PAGE = 5
 
 commands_router = Router()
 
@@ -125,3 +133,120 @@ async def process_max_news_length(message: Message, state: FSMContext):
     )
     await message.answer(f"Максимальная длина текста новости установлена на {max_news_length} символов.")
     await state.clear()
+
+
+# ------------------ ОБРАБОТЧИК ИСТОЧНИКОВ ------------------
+
+@commands_router.message(Command("add_sources"))
+async def add_source_command(message: Message, state: FSMContext):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.answer("У вас нет прав для выполнения этой команды.")
+        return
+
+    await message.answer(
+        "Пожалуйста, отправьте список источников в формате:\n"
+        "ссылка (Название)\n\n"
+        "Можно несколько строк подряд."
+    )
+    await state.set_state(AddSourceStates.waiting_for_sources)
+
+
+@commands_router.message(Command("manage_sources"))
+async def cmd_manage_sources(message: Message):
+    """
+    При вводе /manage_sources выдаём первое сообщение (1-я страница).
+    """
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.answer("У вас нет прав для выполнения этой команды.")
+        return
+
+    sources = list(sources_collection.find())
+    page = 1
+
+    text = build_sources_page_text(sources, page=page, per_page=PER_PAGE)
+    kb = build_sources_page_keyboard(sources, page=page, per_page=PER_PAGE)
+
+    # Отправляем текст + клавиатуру
+    await message.answer(text, reply_markup=kb, parse_mode="Markdown", disable_web_page_preview=True)
+
+
+# ------------------ ОБРАБОТЧИК КЛЮЧЕВЫХ СЛОВ ------------------
+
+@commands_router.message(Command("add_keywords"))
+async def add_keywords_command(message: Message, state: FSMContext):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.answer("У вас нет прав для выполнения этой команды.")
+        return
+
+    await message.answer(
+        "Пожалуйста, отправьте список ключевых слов, по одному на строку."
+    )
+    await state.set_state(AddKeywordsStates.waiting_for_keywords)
+
+
+@commands_router.message(Command("manage_keywords"))
+async def manage_keywords(message: Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.answer("У вас нет прав.")
+        return
+
+    keywords = list(keywords_collection.find())
+    if not keywords:
+        await message.answer("Список ключевых слов пуст.")
+        return
+
+    for kw in keywords:
+        kw_id = str(kw['_id'])
+        kw_text = kw['keyword']
+
+        buttons = [[
+            InlineKeyboardButton(
+                text='🗑',
+                callback_data=KeywordCallback(action='delete', keyword_id=kw_id).pack()
+            )
+        ]]
+        await message.answer(
+            kw_text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+        )
+
+
+# ------------------ ОБРАБОТЧИК ИСКЛЮЧЕНИЙ ------------------
+
+@commands_router.message(Command("add_banwords"))
+async def add_banwords_command(message: Message, state: FSMContext):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.answer("У вас нет прав.")
+        return
+
+    await message.answer(
+        "Пожалуйста, отправьте список исключений (бан-слов), по одному на строку."
+    )
+    await state.set_state(AddBanStates.waiting_for_bans)
+
+
+@commands_router.message(Command("manage_bans"))
+async def manage_bans(message: Message):
+    if message.from_user.id not in ALLOWED_USERS:
+        await message.answer("У вас нет прав.")
+        return
+
+    bans = list(bans_collection.find())
+    if not bans:
+        await message.answer("Список исключений пуст.")
+        return
+
+    for ban in bans:
+        ban_id = str(ban['_id'])
+        ban_text = ban['keyword']
+
+        buttons = [[
+            InlineKeyboardButton(
+                text='🗑',
+                callback_data=BanCallback(action='delete', ban_id=ban_id).pack()
+            )
+        ]]
+        await message.answer(
+            ban_text,
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+        )

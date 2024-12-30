@@ -13,6 +13,7 @@ from aiogram.filters.callback_data import CallbackData
 
 from config import ALLOWED_USERS, logger
 from database import sources_collection
+from states import AddSourceStates
 
 manage_sources_router = Router()
 
@@ -181,24 +182,45 @@ def build_sources_page_keyboard(sources: list, page: int, per_page: int = PER_PA
 
 
 # ------------------ ОБРАБОТЧИК КОМАНДЫ ------------------
+@manage_sources_router.message(AddSourceStates.waiting_for_sources)
+async def process_sources(message: Message, state: FSMContext):
+    sources_text = message.text
+    lines = sources_text.strip().split('\n')
+    added_sources = []
+    failed_sources = []
 
-@manage_sources_router.message(Command("manage_sources"))
-async def cmd_manage_sources(message: Message):
-    """
-    При вводе /manage_sources выдаём первое сообщение (1-я страница).
-    """
-    if message.from_user.id not in ALLOWED_USERS:
-        await message.answer("У вас нет прав для выполнения этой команды.")
-        return
+    pattern = re.compile(r'^(?P<link>\S+)\s*\(\s*(?P<name>.+?)\s*\)$')
 
-    sources = list(sources_collection.find())
-    page = 1
+    for line in lines:
+        line = line.strip()
+        match = pattern.match(line)
+        if match:
+            link = match.group('link').strip()
+            name = match.group('name').strip()
+            if not re.match(r'^https?://', link):
+                failed_sources.append(f"{line} (некорректная ссылка)")
+                continue
 
-    text = build_sources_page_text(sources, page=page, per_page=PER_PAGE)
-    kb = build_sources_page_keyboard(sources, page=page, per_page=PER_PAGE)
+            existing_source = sources_collection.find_one({'url': link})
+            if existing_source:
+                failed_sources.append(f"{link} ({name}) - уже существует")
+                continue
 
-    # Отправляем текст + клавиатуру
-    await message.answer(text, reply_markup=kb, parse_mode="Markdown", disable_web_page_preview=True)
+            sources_collection.insert_one({"url": link, "name": name, "active": True})
+            added_sources.append(f"{link} ({name})")
+        else:
+            failed_sources.append(f"{line} (неверный формат)")
+
+    response_messages = []
+    if added_sources:
+        response_messages.append("Добавлены и активированы:")
+        response_messages.extend(added_sources)
+    if failed_sources:
+        response_messages.append("Не удалось распознать:")
+        response_messages.extend(failed_sources)
+
+    await message.answer('\n'.join(response_messages))
+    await state.clear()
 
 
 # ------------------ ОБРАБОТЧИК ПЕРЕКЛЮЧЕНИЯ СТРАНИЦ ------------------

@@ -13,16 +13,6 @@ from .callbacks import KeywordCallback
 
 manage_keywords_router = Router()
 
-@manage_keywords_router.message(Command("add_keywords"))
-async def add_keywords_command(message: Message, state: FSMContext):
-    if message.from_user.id not in ALLOWED_USERS:
-        await message.answer("У вас нет прав для выполнения этой команды.")
-        return
-
-    await message.answer(
-        "Пожалуйста, отправьте список ключевых слов, по одному на строку."
-    )
-    await state.set_state(AddKeywordsStates.waiting_for_keywords)
 
 
 @manage_keywords_router.message(AddKeywordsStates.waiting_for_keywords)
@@ -52,31 +42,7 @@ async def process_keywords(message: Message, state: FSMContext):
     await state.clear()
 
 
-@manage_keywords_router.message(Command("manage_keywords"))
-async def manage_keywords(message: Message):
-    if message.from_user.id not in ALLOWED_USERS:
-        await message.answer("У вас нет прав.")
-        return
 
-    keywords = list(keywords_collection.find())
-    if not keywords:
-        await message.answer("Список ключевых слов пуст.")
-        return
-
-    for kw in keywords:
-        kw_id = str(kw['_id'])
-        kw_text = kw['keyword']
-
-        buttons = [[
-            InlineKeyboardButton(
-                text='🗑',
-                callback_data=KeywordCallback(action='delete', keyword_id=kw_id).pack()
-            )
-        ]]
-        await message.answer(
-            kw_text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
-        )
 
 
 @manage_keywords_router.callback_query(KeywordCallback.filter())

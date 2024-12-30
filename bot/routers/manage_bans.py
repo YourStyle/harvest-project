@@ -13,16 +13,7 @@ from .callbacks import BanCallback
 
 manage_bans_router = Router()
 
-@manage_bans_router.message(Command("add_banwords"))
-async def add_banwords_command(message: Message, state: FSMContext):
-    if message.from_user.id not in ALLOWED_USERS:
-        await message.answer("У вас нет прав.")
-        return
 
-    await message.answer(
-        "Пожалуйста, отправьте список исключений (бан-слов), по одному на строку."
-    )
-    await state.set_state(AddBanStates.waiting_for_bans)
 
 
 @manage_bans_router.message(AddBanStates.waiting_for_bans)
@@ -50,33 +41,6 @@ async def process_bans(message: Message, state: FSMContext):
 
     await message.answer("\n".join(resp))
     await state.clear()
-
-
-@manage_bans_router.message(Command("manage_bans"))
-async def manage_bans(message: Message):
-    if message.from_user.id not in ALLOWED_USERS:
-        await message.answer("У вас нет прав.")
-        return
-
-    bans = list(bans_collection.find())
-    if not bans:
-        await message.answer("Список исключений пуст.")
-        return
-
-    for ban in bans:
-        ban_id = str(ban['_id'])
-        ban_text = ban['keyword']
-
-        buttons = [[
-            InlineKeyboardButton(
-                text='🗑',
-                callback_data=BanCallback(action='delete', ban_id=ban_id).pack()
-            )
-        ]]
-        await message.answer(
-            ban_text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
-        )
 
 
 @manage_bans_router.callback_query(BanCallback.filter())
