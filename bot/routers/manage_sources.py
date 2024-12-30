@@ -102,7 +102,7 @@ def build_sources_page_keyboard(sources: list, page: int, per_page: int = PER_PA
 
     # Получим нужный срез
     start_index = (page - 1) * per_page
-    end_index = start_index + per_page
+    end_index = start_index + per_page if start_index + per_page < total_pages else total_pages - 1
     page_sources = sources[start_index:end_index]
 
     # Формируем кнопки
