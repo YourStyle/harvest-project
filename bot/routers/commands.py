@@ -18,9 +18,12 @@ from states import (
     AddKeywordsStates,
     AddBanStates
 )
-from .callbacks import KeywordCallback, BanCallback
 
-from routers.manage_sources import build_sources_page_keyboard, build_sources_page_text
+from .manage_bans import build_bans_page_text, build_bans_page_keyboard
+
+from .manage_sources import build_sources_page_keyboard, build_sources_page_text
+
+from .manage_keywords import build_keywords_page_text, build_keywords_page_keyboard
 
 PER_PAGE = 5
 
@@ -195,20 +198,11 @@ async def manage_keywords(message: Message):
         await message.answer("Список ключевых слов пуст.")
         return
 
-    for kw in keywords:
-        kw_id = str(kw['_id'])
-        kw_text = kw['keyword']
+    page = 1
+    text = build_keywords_page_text(keywords, page=page, per_page=PER_PAGE)
+    kb = build_keywords_page_keyboard(keywords, page=page, per_page=PER_PAGE)
 
-        buttons = [[
-            InlineKeyboardButton(
-                text='🗑',
-                callback_data=KeywordCallback(action='delete', keyword_id=kw_id).pack()
-            )
-        ]]
-        await message.answer(
-            kw_text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
-        )
+    await message.answer(text, parse_mode="HTML", reply_markup=kb)
 
 
 # ------------------ ОБРАБОТЧИК ИСКЛЮЧЕНИЙ ------------------
@@ -231,22 +225,13 @@ async def manage_bans(message: Message):
         await message.answer("У вас нет прав.")
         return
 
-    bans = list(bans_collection.find())
-    if not bans:
+    all_bans = list(bans_collection.find())
+    if not all_bans:
         await message.answer("Список исключений пуст.")
         return
 
-    for ban in bans:
-        ban_id = str(ban['_id'])
-        ban_text = ban['keyword']
+    page = 1
+    text = build_bans_page_text(all_bans, page=page, per_page=PER_PAGE)
+    kb = build_bans_page_keyboard(all_bans, page=page, per_page=PER_PAGE)
 
-        buttons = [[
-            InlineKeyboardButton(
-                text='🗑',
-                callback_data=BanCallback(action='delete', ban_id=ban_id).pack()
-            )
-        ]]
-        await message.answer(
-            ban_text,
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
-        )
+    await message.answer(text, parse_mode="HTML", reply_markup=kb)

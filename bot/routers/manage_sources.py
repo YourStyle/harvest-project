@@ -59,7 +59,7 @@ def build_sources_page_text(sources: list, page: int, per_page: int = 5) -> str:
     page_slice = sources[start_index:end_index]
 
     lines = []
-    lines.append(f"**Страница** {page}/{total_pages}\n")
+    lines.append(f"<b>Страница</b> {page}/{total_pages}\n")
 
     # Перечислим источники на текущей странице
     for i, src in enumerate(page_slice, start=1):
@@ -97,12 +97,12 @@ def build_sources_page_keyboard(sources: list, page: int, per_page: int = PER_PA
     # Чтобы не выходить за рамки
     if page < 1:
         page = 1
-    if page > total_pages:
+    if page >= total_pages:
         page = total_pages
 
     # Получим нужный срез
     start_index = (page - 1) * per_page
-    end_index = start_index + per_page if start_index + per_page < total_pages else total_pages - 1
+    end_index = start_index + per_page
     page_sources = sources[start_index:end_index]
 
     # Формируем кнопки
@@ -168,7 +168,7 @@ def build_sources_page_keyboard(sources: list, page: int, per_page: int = PER_PA
     if total_pages > 1:
         nav_buttons.append(
             InlineKeyboardButton(
-                text=f"{page}/{total_pages}",
+                text=f"{page} / {total_pages}",
                 callback_data="pass"
             )
         )
@@ -236,17 +236,15 @@ async def on_pagination_callback(call: CallbackQuery, callback_data: SourcePagin
         return
 
     page = callback_data.page
-
     sources = list(sources_collection.find())
     text = build_sources_page_text(sources, page=page, per_page=PER_PAGE)
     kb = build_sources_page_keyboard(sources, page=page, per_page=PER_PAGE)
-
     # Обновляем именно text + reply_markup
     try:
         await call.message.edit_text(
             text=text,
             reply_markup=kb,
-            parse_mode="Markdown",
+            parse_mode="HTML",
             disable_web_page_preview=True
         )
     except Exception as e:
@@ -303,7 +301,6 @@ async def on_source_action_callback(call: CallbackQuery, callback_data: SourceAc
 
     text = build_sources_page_text(sources, page=page, per_page=PER_PAGE)
     kb = build_sources_page_keyboard(sources, page=page, per_page=PER_PAGE)
-
     try:
         await call.message.edit_text(
             text=text,

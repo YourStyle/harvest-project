@@ -36,7 +36,10 @@ async def publish_single_news(news, bot):
         source_text = ""
         read_more_link = ""
 
-    tags = " ".join(f"#{word}" for word in list(news.get("found_keywords", [])))
+    tags = " ".join(
+        f"#{word.replace(' ', '_')}"
+        for word in news.get("found_keywords", [])
+    )
 
     full_text = f"<b>{read_more_link}</b>\n{text_content}\n\n{tags}\n\n{source_text}"
 
