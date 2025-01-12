@@ -7,7 +7,7 @@ from config import CHANNEL_ID, logger
 from database import collection, config_collection
 
 from misc import get_effective_title, flexible_truncate_text_by_delimiters, remove_first_sentence_if_in_title, \
-    remove_publication_date_lines
+    remove_publication_date_lines, remove_custom_fragments
 
 # либо передавать его в функцию scheduled как параметр
 MAX_MESSAGE_LENGTH = 4096  # fallback, если не найдёт в конфиге
@@ -26,6 +26,8 @@ async def publish_single_news(news, bot):
     # --- 2) Удаляем "дату публикации", если она отдельной строкой в начале/конце ---
     text_content = remove_publication_date_lines(text_content)
 
+    text_content = remove_custom_fragments(text_content)
+
     image = news.get("image")  # URL изображения
     url = news.get("url")  # Ссылка на источник
 
@@ -41,14 +43,13 @@ async def publish_single_news(news, bot):
         for word in news.get("found_keywords", [])
     )
 
-    full_text = f"<b>{read_more_link}</b>\n{text_content}\n\n{tags}\n\n{source_text}"
+    full_text = f"<b>{read_more_link}</b>\n{text_content}\n\n{tags}"
 
     if len(full_text) > max_news_length:
-        overhead_text = f"<b>{read_more_link}</b>\n\n{tags}\n\n{source_text}"
+        overhead_text = f"<b>{read_more_link}</b>\n\n{tags}"
         overhead_length = len(overhead_text)
 
         allowed_length_for_text = max_news_length - overhead_length
-        print(allowed_length_for_text)
         if allowed_length_for_text < 1:
             truncated_text = ""
         else:

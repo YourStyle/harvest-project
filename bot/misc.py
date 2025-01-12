@@ -1,6 +1,11 @@
 import re
 from config import CUSTOM_TITLE_SOURCES
-import re
+
+TO_REMOVE_PATTERNS = [
+    r'^Экспорт/Импорт\s*$',
+    r'^Фот\w*:\s*.*'
+]
+
 
 def extract_first_sentence(text: str) -> str:
     """
@@ -51,27 +56,15 @@ def get_effective_title(news: dict) -> str:
         return raw_title
 
 
-import re
-
-
 def flexible_truncate_text_by_delimiters(
         text: str,
         max_len: int,
         flex_margin: int = 100
 ) -> str:
     """
-    Обрезает text, сохраняя конец предложения, и разрешает немного выйти
-    за границу max_len (до flex_margin символов), если знак препинания
-    (конец предложения) встречается чуть позже.
-
-    1) Если text <= max_len, возвращаем text как есть.
-    2) Иначе берём кусок text[:max_len].
-       - Ищем последний разделитель (.?!;\n) в пределах max_len.
-         Если он найден, обрезаем по него.
-         Если нет, переходим к шагу 3.
-    3) Смотрим, есть ли разделитель между max_len и max_len + flex_margin (не выходя за len(text)).
-       Если есть, обрезаем по этот разделитель (включая сам знак).
-       Если нет, просто возвращаем text[:max_len].
+    Обрезает text, стараясь завершить на знаках пунктуации (.?!;\n), и разрешает
+    чуть выйти за границу max_len (до flex_margin символов). Если во всех этих
+    пределах не найден знак, принудительно идём дальше до ближайшего разделителя.
     """
 
     # Наш набор разделителей: точка, вопросительный, восклицательный, точка с запятой, \n
@@ -79,15 +72,15 @@ def flexible_truncate_text_by_delimiters(
 
     text = text.strip()
     if len(text) <= max_len:
+        # 1) Если весь текст короче лимита, возвращаем без изменений
         return text
 
-    # 1) Первичная обрезка по max_len
+    # 2) Первичная обрезка по max_len
     truncated_initial = text[:max_len]
 
-    # 2) Ищем последний разделитель в пределах max_len
+    # 3) Ищем последний разделитель в пределах max_len
     matches_initial = list(pattern.finditer(truncated_initial))
     if matches_initial:
-        # Берём последнее найденное совпадение
         last_match = matches_initial[-1]
         last_char = truncated_initial[last_match.start()]
         if last_char == '\n':
@@ -97,28 +90,32 @@ def flexible_truncate_text_by_delimiters(
             # Если это . ? ! ;
             return truncated_initial[: last_match.end()].rstrip()
 
-    # 3) Если нет разделителя в truncated_initial, проверяем «гибкий коридор»
-    #    от max_len до max_len+flex_margin (не выходя за конец текста)
+    # 4) Проверяем «гибкий коридор» (от max_len до max_len+flex_margin)
     max_flex_end = min(max_len + flex_margin, len(text))
-
-    # Кусок от max_len до max_flex_end
     extended_part = text[max_len:max_flex_end]
-
     matches_extended = list(pattern.finditer(extended_part))
     if matches_extended:
-        # Берём первое вхождение, ведь мы хотим «закончить» предложение
         first_match = matches_extended[0]
-        start_pos = max_len + first_match.start()  # позиция в исходном тексте
+        start_pos = max_len + first_match.start()
         char_found = text[start_pos]
-
         if char_found == '\n':
             return text[:start_pos].rstrip()
         else:
-            return text[:(start_pos + 1)].rstrip()
+            return text[: (start_pos + 1)].rstrip()
 
-    # Если и в «гибком коридоре» не нашли разделитель,
-    # остаётся вернуть обычную обрезку
-    return truncated_initial
+    # 5) Если в гибком коридоре тоже не нашли разделитель,
+    rest_part = text[max_flex_end:]
+    matches_rest = list(pattern.finditer(rest_part))
+    if matches_rest:
+        # Берём первое вхождение за пределами гибкого коридора
+        forced_match = matches_rest[0]
+        forced_start_pos = max_flex_end + forced_match.start()
+        char_found = text[forced_start_pos]
+        if char_found == '\n':
+            return text[:forced_start_pos].rstrip()
+        else:
+            return text[: (forced_start_pos + 1)].rstrip()
+
 
 def remove_first_sentence_if_in_title(text: str, title: str) -> str:
     """
@@ -154,6 +151,7 @@ def remove_first_sentence_if_in_title(text: str, title: str) -> str:
     else:
         # Оставляем, как было
         return text
+
 
 # Месяцы по-русски в родительном падеже
 MONTHS_RU = (
@@ -225,4 +223,29 @@ def remove_publication_date_lines(text: str) -> str:
         new_lines.append(line)
 
     # Склеиваем обратно
+    return "\n".join(new_lines)
+
+
+def remove_custom_fragments(text: str) -> str:
+    lines = text.splitlines()
+    new_lines = []
+
+    for i, line in enumerate(lines):
+        line_stripped = line.strip()
+        matched_pattern = any(
+            re.match(pattern, line_stripped, re.IGNORECASE)
+            for pattern in TO_REMOVE_PATTERNS
+        )
+
+        if matched_pattern:
+            # Проверяем, есть ли пустая строка сверху *или* снизу
+            prev_empty = (i > 0 and not lines[i - 1].strip())
+            next_empty = (i < len(lines) - 1 and not lines[i + 1].strip())
+
+            if prev_empty or next_empty:
+                # Удаляем
+                continue
+
+        new_lines.append(line)
+
     return "\n".join(new_lines)
