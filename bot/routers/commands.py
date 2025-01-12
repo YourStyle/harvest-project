@@ -68,7 +68,7 @@ async def set_publish_interval_command(message: Message, state: FSMContext):
         await message.answer("У вас нет прав для выполнения этой команды.")
         return
 
-    await message.answer("Пожалуйста, введите интервал публикации в секундах:")
+    await message.answer("Пожалуйста, введите интервал публикации в минутах:")
     await state.set_state(SetPublishIntervalState.waiting_for_interval)
 
 
@@ -236,5 +236,5 @@ async def process_publish_interval(message: Message, state: FSMContext):
         {"$set": {"publish_interval": publish_interval * 60}},
         upsert=True
     )
-    await message.answer(f"Интервал публикации установлен на {publish_interval} секунд.")
+    await message.answer(f"Интервал публикации установлен на {publish_interval} минут.")
     await state.clear()
