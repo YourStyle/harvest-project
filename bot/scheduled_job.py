@@ -33,7 +33,7 @@ async def publish_single_news(news, bot):
 
     if url:
         source_text = f'<a href="{url}">Источник</a>'
-        read_more_link = f'<a href="{url}">"{title}"</a>'
+        read_more_link = f'<a href="{url}">{title}</a>'
     else:
         source_text = ""
         read_more_link = ""
@@ -43,10 +43,10 @@ async def publish_single_news(news, bot):
         for word in news.get("found_keywords", [])
     )
 
-    full_text = f"<b>{read_more_link}</b>\n{text_content}\n\n{tags}"
+    full_text = f"<b>{read_more_link}</b>\n{text_content}"
 
     if len(full_text) > max_news_length:
-        overhead_text = f"<b>{read_more_link}</b>\n\n{tags}"
+        overhead_text = f"<b>{read_more_link}</b>"
         overhead_length = len(overhead_text)
 
         allowed_length_for_text = max_news_length - overhead_length
@@ -55,7 +55,7 @@ async def publish_single_news(news, bot):
         else:
             truncated_text = flexible_truncate_text_by_delimiters(text_content, allowed_length_for_text)
 
-        full_text = f"<b>{read_more_link}</b>\n\n{truncated_text}\n\n{tags}"
+        full_text = f"<b>{read_more_link}</b>\n\n{truncated_text}"
     try:
         # Публикуем
         if image:
