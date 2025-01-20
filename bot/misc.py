@@ -18,7 +18,6 @@ def compress_newlines(text: str) -> str:
     lines = text.split('\n')
     # Берём только те строки, в которых есть не-пробельные символы.
     new_lines = [line for line in lines if line.strip()]
-    print(new_lines)
     # Склеиваем обратно.
     return '\n'.join(new_lines).strip()
 
@@ -130,7 +129,7 @@ def get_effective_title(news: dict) -> str:
 def flexible_truncate_text_by_delimiters(
         text: str,
         max_len: int,
-        flex_margin: int = 100
+        flex_margin: int = 200
 ) -> str:
     """
     Обрезает text, стараясь завершить на знаках пунктуации (.?!;\n), и разрешает
@@ -149,6 +148,18 @@ def flexible_truncate_text_by_delimiters(
     # 2) Первичная обрезка по max_len
     truncated_initial = text[:max_len]
 
+    max_flex_end = min(max_len + flex_margin, len(text))
+    extended_part = text[max_len:max_flex_end]
+    matches_extended = list(pattern.finditer(extended_part))
+    if matches_extended:
+        first_match = matches_extended[0]
+        start_pos = max_len + first_match.start()
+        char_found = text[start_pos]
+        if char_found == '\n':
+            return text[:start_pos].rstrip()
+        else:
+            return text[: (start_pos + 1)].rstrip()
+
     # 3) Ищем последний разделитель в пределах max_len
     matches_initial = list(pattern.finditer(truncated_initial))
     if matches_initial:
@@ -161,18 +172,7 @@ def flexible_truncate_text_by_delimiters(
             # Если это . ? ! ;
             return truncated_initial[: last_match.end()].rstrip()
 
-    # 4) Проверяем «гибкий коридор» (от max_len до max_len+flex_margin)
-    max_flex_end = min(max_len + flex_margin, len(text))
-    extended_part = text[max_len:max_flex_end]
-    matches_extended = list(pattern.finditer(extended_part))
-    if matches_extended:
-        first_match = matches_extended[0]
-        start_pos = max_len + first_match.start()
-        char_found = text[start_pos]
-        if char_found == '\n':
-            return text[:start_pos].rstrip()
-        else:
-            return text[: (start_pos + 1)].rstrip()
+
 
     # 5) Если в гибком коридоре тоже не нашли разделитель,
     rest_part = text[max_flex_end:]

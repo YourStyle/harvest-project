@@ -37,6 +37,21 @@ async def publish_single_news(news, bot):
     image = news.get("image")  # URL изображения
     url = news.get("url")  # Ссылка на источник
 
+
+
+    tags = " ".join(
+        f"#{word.replace(' ', '_')}"
+        for word in news.get("found_keywords", [])
+    )
+
+
+
+
+    if len(text_content) > max_news_length:
+        print(len(text_content))
+        text_content = flexible_truncate_text_by_delimiters(text_content, max_news_length)
+        print(text_content)
+        print(max_news_length)
     if url:
         first_sentence, remainder = extract_and_remove_first_sentence(text_content)
         linked_first = f'<a href="{url}">{first_sentence}</a>'
@@ -46,15 +61,9 @@ async def publish_single_news(news, bot):
         # Если URL нет, ничего не делаем, текст остаётся как есть
         pass
 
-    tags = " ".join(
-        f"#{word.replace(' ', '_')}"
-        for word in news.get("found_keywords", [])
-    )
-
     full_text = text_content
 
-    if len(full_text) > max_news_length:
-        full_text = flexible_truncate_text_by_delimiters(full_text, max_news_length)
+    print(len(text_content))
     try:
         # Публикуем
         if image:
@@ -77,15 +86,35 @@ async def publish_single_news(news, bot):
                         parse_mode='HTML',
                         disable_web_page_preview=True
                     )
+                elif "can't parse entities" in error_message:
+                    full_text = full_text + '</a>'
+                    await bot.send_message(
+                        chat_id=CHANNEL_ID,
+                        text=full_text,
+                        parse_mode='HTML',
+                        disable_web_page_preview=True
+                    )
                 else:
                     raise e
         else:
-            await bot.send_message(
-                chat_id=CHANNEL_ID,
-                text=full_text,
-                parse_mode='HTML',
-                disable_web_page_preview=True
-            )
+            try:
+                await bot.send_message(
+                    chat_id=CHANNEL_ID,
+                    text=full_text,
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
+            except Exception as e:
+                error_message = str(e).lower()
+                if "can't parse entities" in error_message:
+                    logger.error(f"Ошибка при отправке новости '{title}': {e}")
+                    full_text = full_text + '</a>'
+                    await bot.send_message(
+                        chat_id=CHANNEL_ID,
+                        text=full_text,
+                        parse_mode='HTML',
+                        disable_web_page_preview=True
+                    )
 
         # Отмечаем новость как опубликованную
         collection.update_one(
