@@ -3,21 +3,99 @@ from config import CUSTOM_TITLE_SOURCES
 
 TO_REMOVE_PATTERNS = [
     r'^Экспорт/Импорт\s*$',
-    r'^Фот\w*:\s*.*'
+    r'^Фот\w*:\s*.*',
+    r'(?i)^\s*подписывайтесь на нас в\s*$',
+    r'(?i)^\s*дзен\s*$',
+    r'(?i)^\s*telegram\s*$',
+    r'(?i)^\s*и\s*$',
 ]
+
+
+def compress_newlines(text: str) -> str:
+    """
+    Удаляет полностью пустые строки (в том числе состоящие только из пробелов).
+    """
+    lines = text.split('\n')
+    # Берём только те строки, в которых есть не-пробельные символы.
+    new_lines = [line for line in lines if line.strip()]
+    print(new_lines)
+    # Склеиваем обратно.
+    return '\n'.join(new_lines).strip()
+
+
+def join_single_word_lines(text: str) -> str:
+    """
+    Ищет строки, в которых ровно одно слово (без учёта пробелов в начале/конце),
+    и «приклеивает» такие строки к предыдущей, отделяя пробелом.
+
+    При этом:
+    - Пустые строки не трогаются и не "склеиваются".
+    - Если "одиночное слово" оказалось в самом верху (либо перед ним пустая строка),
+      оно остаётся как есть (не получится «приклеить»).
+    """
+    lines = text.splitlines()
+    new_lines = []
+
+    for line in lines:
+        stripped_line = line.strip()
+        # Проверяем, пустая ли это строка
+        if not stripped_line:
+            # Просто добавляем пустую строку
+            new_lines.append(line)
+            continue
+
+        # Если в строке ровно одно слово:
+        words = stripped_line.split()
+        if len(words) == 1:
+            # Есть ли предыдущая непустая строка, к которой можно приклеить?
+            if new_lines and new_lines[-1].strip():
+                # Удалим лишние пробелы в конце предыдущей и добавим текущее «одиночное слово»
+                new_lines[-1] = new_lines[-1].rstrip() + " " + stripped_line
+            else:
+                # Если пред. строки нет или она пустая — придётся оставить как есть
+                new_lines.append(line)
+        else:
+            new_lines.append(line)
+
+    return "\n".join(new_lines)
+
+
+def extract_and_remove_first_sentence(text: str):
+    """
+    Извлекает первое «предложение» (до одного из символов .?!;\n) вместе с этим знаком,
+    возвращает кортеж (это_предложение, остаток_текста).
+    Если нет разделителей, значит весь text — одно предложение.
+    """
+    text = text.strip()
+    pattern = re.compile(r'[.?!;\n]')
+    match = pattern.search(text)
+
+    if not match:
+        # Не нашли ни точек, ни восклицательных/вопросительных, ни переноса и т.п. —
+        # значит весь текст и есть "одно предложение".
+        return text, ""
+
+    # Вырезаем первое предложение, включая найденный знак препинания (кроме \n)
+    found_char = text[match.start()]
+    if found_char == '\n':
+        # Если попался перенос строки, значит предложение заканчивается прямо перед ним
+        first_sentence = text[:match.start()].strip()
+        remainder = text[match.start() + 1:].lstrip()
+    else:
+        # Если это ., !, ? или ; — добавим его к предложению
+        first_sentence = text[:match.end()].strip()
+        remainder = text[match.end():].lstrip()
+
+    return first_sentence, remainder
 
 
 def extract_first_sentence(text: str) -> str:
     """
-    Возвращает подстроку от начала `text` до первого символа:
-     - '.', '!', '?'
-     - или переноса строки '\n'
-    При этом, если найден символ пунктуации (.!?), оставляем его в конце предложения,
-    а если найден перенос строки, то не добавляем его к результату.
+        (ИСПОЛЬЗУЕТСЯ ВНУТРИ get_effective_title, если нужно)
+        Возвращает подстроку от начала `text` до первого символа .?!\n.
+        Сохраняет символ, если это пунктуация, и отбрасывает, если это \n.
     """
     text = text.strip()
-    # Ищем любой из символов конца предложения: точку, восклицательный, вопросительный,
-    # а также '\n'.
     pattern = re.compile(r'[.!?]|\n')
     match = pattern.search(text)
 
@@ -26,33 +104,26 @@ def extract_first_sentence(text: str) -> str:
         found_char = text[match.start()]
 
         if found_char in ('.', '!', '?'):
-            # Если символ - пунктуация, сохраним его.
             return text[: match.end()].strip()
         else:
-            # Иначе это перенос строки (found_char == '\n'),
-            # значит возвращаем текст до него, не включая сам перенос.
             return text[: match.start()].strip()
     else:
-        # Если не нашли ни одного из символов, возвращаем весь текст
         return text
 
 
 def get_effective_title(news: dict) -> str:
     """
-    Возвращаем «конечный» заголовок для публикации.
-    Если news["title"] есть в словаре CUSTOM_TITLE_SOURCES и там указано "FIRST_SENTENCE",
+    Если в CUSTOM_TITLE_SOURCES для данного заголовка прописано "FIRST_SENTENCE",
     то берём первое предложение из news["text"].
-    Иначе возвращаем обычный заголовок.
+    Иначе — обычный заголовок.
     """
     raw_title = news.get("title", "Без заголовка")
     rule = CUSTOM_TITLE_SOURCES.get(raw_title)
 
     if rule == "FIRST_SENTENCE":
-        # Берём первое предложение из text
         text_content = news.get("text", "")
         return extract_first_sentence(text_content)
     else:
-        # Обычное поведение
         return raw_title
 
 
@@ -162,17 +233,15 @@ MONTHS_RU = (
 # Пример: r'^\s*26 января( \d{4} (года?)?)?\s*$'
 # Соединим это в одну большую регулярку:
 DATE_REGEX = re.compile(
-    rf'''^          # начало строки
-    \s*             # пробелы?
-    (               # начало группы
-      # --- числовые форматы dd[./ -]mm[./ -]yyyy ---
+    rf'''^
+    \s*
+    (
       \d{{1,2}}[.\-/\s]\d{{1,2}}[.\-/\s]\d{{2,4}}
-
-      | # --- или русская текстовая дата, напр. "26 января 2024 года" ---
+      |
       \d{{1,2}}\s+{MONTHS_RU}(\s+\d{{4}}(\s+года?)?)?
-    )               # конец группы
-    \s*             # пробелы?
-    $               # конец строки
+    )
+    \s*
+    $
     ''',
     re.VERBOSE | re.IGNORECASE
 )

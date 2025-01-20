@@ -7,7 +7,8 @@ from config import CHANNEL_ID, logger
 from database import collection, config_collection
 
 from misc import get_effective_title, flexible_truncate_text_by_delimiters, remove_first_sentence_if_in_title, \
-    remove_publication_date_lines, remove_custom_fragments
+    remove_publication_date_lines, remove_custom_fragments, compress_newlines, extract_and_remove_first_sentence, \
+    join_single_word_lines
 
 # либо передавать его в функцию scheduled как параметр
 MAX_MESSAGE_LENGTH = 4096  # fallback, если не найдёт в конфиге
@@ -17,45 +18,43 @@ async def publish_single_news(news, bot):
     config = config_collection.find_one({"_id": "bot_config"})
     max_news_length = config.get('max_news_length', MAX_MESSAGE_LENGTH)
 
+    # Убрали пока заголовки пока будет только первое предложение
     title = get_effective_title(news)
     text_content = news.get("text", "Нет содержания")
 
     # --- 1) Удаляем из текста первое предложение, если оно уже в заголовке ---
-    text_content = remove_first_sentence_if_in_title(text_content, title)
+    # text_content = remove_first_sentence_if_in_title(text_content, title)
 
     # --- 2) Удаляем "дату публикации", если она отдельной строкой в начале/конце ---
     text_content = remove_publication_date_lines(text_content)
 
     text_content = remove_custom_fragments(text_content)
 
+    text_content = compress_newlines(text_content)
+
+    text_content = join_single_word_lines(text_content)
+
     image = news.get("image")  # URL изображения
     url = news.get("url")  # Ссылка на источник
 
     if url:
-        source_text = f'<a href="{url}">Источник</a>'
-        read_more_link = f'<a href="{url}">{title}</a>'
+        first_sentence, remainder = extract_and_remove_first_sentence(text_content)
+        linked_first = f'<a href="{url}">{first_sentence}</a>'
+        # Собираем обратно
+        text_content = linked_first + ' ' + remainder.strip()
     else:
-        source_text = ""
-        read_more_link = ""
+        # Если URL нет, ничего не делаем, текст остаётся как есть
+        pass
 
     tags = " ".join(
         f"#{word.replace(' ', '_')}"
         for word in news.get("found_keywords", [])
     )
 
-    full_text = f"<b>{read_more_link}</b>\n{text_content}"
+    full_text = text_content
 
     if len(full_text) > max_news_length:
-        overhead_text = f"<b>{read_more_link}</b>"
-        overhead_length = len(overhead_text)
-
-        allowed_length_for_text = max_news_length - overhead_length
-        if allowed_length_for_text < 1:
-            truncated_text = ""
-        else:
-            truncated_text = flexible_truncate_text_by_delimiters(text_content, allowed_length_for_text)
-
-        full_text = f"<b>{read_more_link}</b>\n\n{truncated_text}"
+        full_text = flexible_truncate_text_by_delimiters(full_text, max_news_length)
     try:
         # Публикуем
         if image:
