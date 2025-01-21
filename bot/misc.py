@@ -3,17 +3,20 @@ from config import CUSTOM_TITLE_SOURCES
 from bs4 import BeautifulSoup
 import html
 
-TO_REMOVE_PATTERNS = [
+TO_REMOVE_PATTERNS_CONDITIONAL = [
     r'^Экспорт/Импорт\s*$',
     r'^Фот\w*:\s*.*',
     r'(?i)^\s*подписывайтесь на нас в\s*$',
     r'(?i)^\s*дзен\s*$',
     r'(?i)^\s*telegram\s*$',
     r'(?i)^\s*и\s*$',
-    r'(?i)^\s*смотрите нас на rutube,\s*youtube\s*[.,!]*\s*$',
-    r'(?i)^\s*или присоединяйтесь вконтакте\s*[.,!]*\s*$',
-    r'(?i)^\s*подписывайтесь на наш telegram\s*[.,!]*\s*$',
-    r'(?i)^\s*— все новости в оперативном режиме\.?\s*поделиться\s*$'
+]
+
+TO_REMOVE_PATTERNS_UNCONDITIONAL = [
+    r'(?i)^\s*[сc]мотрите\s+нас\s+на\s+rutube,\s*youtube\s*[.,!]*\s*$',
+    r'(?i)^\s*или\s+присоединяйтесь\s+вконтакте\s*[.,!]*\s*$',
+    r'(?i)^\s*подписывайтесь\s+на\s+наш\s+telegram\s*[.,!]*\s*$',
+    r'(?i)^\s*[-—]\s*все\s+новости\s+в\s+оперативном\s+режиме\.?\s*поделиться\s*$',
 ]
 
 
@@ -300,29 +303,40 @@ def remove_publication_date_lines(text: str) -> str:
 
 
 def remove_custom_fragments(text: str) -> str:
+    """
+    Удаляет строки, которые подходят под «безусловные» паттерны (сразу),
+    либо подходят под «условные» (только если сверху/снизу пустая строка).
+    """
     lines = text.splitlines()
     new_lines = []
 
     for i, line in enumerate(lines):
         line_stripped = line.strip()
-        matched_pattern = any(
-            re.match(pattern, line_stripped, re.IGNORECASE)
-            for pattern in TO_REMOVE_PATTERNS
-        )
 
-        if matched_pattern:
-            # Проверяем, есть ли пустая строка сверху *или* снизу
+        # 1) Сначала проверяем «безусловные» паттерны
+        matched_unconditional = any(
+            re.match(pattern, line_stripped, re.IGNORECASE)
+            for pattern in TO_REMOVE_PATTERNS_UNCONDITIONAL
+        )
+        if matched_unconditional:
+            # Удаляем строку без каких-либо дополнительных условий
+            continue
+
+        # 2) Если не попали под безусловные, проверяем «условные» паттерны
+        matched_conditional = any(
+            re.match(pattern, line_stripped, re.IGNORECASE)
+            for pattern in TO_REMOVE_PATTERNS_CONDITIONAL
+        )
+        if matched_conditional:
             prev_empty = (i > 0 and not lines[i - 1].strip())
             next_empty = (i < len(lines) - 1 and not lines[i + 1].strip())
-
+            # Если сверху или снизу пустая строка — удаляем
             if prev_empty or next_empty:
-                # Удаляем
                 continue
 
         new_lines.append(line)
 
     return "\n".join(new_lines)
-
 
 def clean_news_html(html_text: str) -> str:
     """
