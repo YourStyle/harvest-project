@@ -1,6 +1,7 @@
 import re
 from config import CUSTOM_TITLE_SOURCES
 from bs4 import BeautifulSoup
+import html
 
 TO_REMOVE_PATTERNS = [
     r'^Экспорт/Импорт\s*$',
@@ -322,24 +323,41 @@ def remove_custom_fragments(text: str) -> str:
 
 
 
-def clean_news_html(html: str) -> str:
+def clean_news_html(html_text: str) -> str:
     """
-    Извлекает текст только из тегов <div>, <p> и <span>, убирая прочие теги.
-    Для этого используется BeautifulSoup. Если его нет, нужно установить:
-        pip install beautifulsoup4
+    Извлекает текст только из тегов <div>, <p>, <span>, при этом:
+      1) Удаляем все <table> (вместе с содержимым) — не берём текст из таблиц вообще.
+      2) Для разрешённых тегов берём вложенный текст, разделяя вложенные элементы пробелами (separator=' ').
+      3) Склеиваем блоки (div/p/span) переводами строк.
+      4) Раскодируем HTML-сущности (&lt; -> <, &gt; -> >, &nbsp; -> пробел и т.п.).
+      5) Если нужно, убираем символы < и > (если они остались).
     """
 
-    soup = BeautifulSoup(html, 'html.parser')
+    soup = BeautifulSoup(html_text, 'html.parser')
 
-    # Соберём текст из всех <div>, <p> и <span>, включая их потомков
+    # 1. Удаляем все таблицы (table, вместе со всем содержимым)
+    for table in soup.find_all('table'):
+        table.decompose()
+
+    # 2. Собираем текст ТОЛЬКО из <div>, <p>, <span>, исключая любые другие теги
     extracted_texts = []
     for tag in soup.find_all(['div', 'p', 'span']):
-        # get_text() вернёт текст всего вложенного содержимого
-        # strip=True убирает пробелы/переносы по краям
-        text_chunk = tag.get_text(strip=True)
+        # Параметр separator=' ' добавляет пробелы между вложенными элементами,
+        # чтобы слова не "склеивались"
+        text_chunk = tag.get_text(separator=' ', strip=True)
         if text_chunk:
             extracted_texts.append(text_chunk)
 
-    # Склеим все фрагменты, вставляя перенос строки
+    # Склеиваем каждый блок новой строкой
     cleaned_text = "\n".join(extracted_texts)
+
+    # 3. Раскодируем HTML-сущности (&lt; -> <, &nbsp; -> пробел и т.д.)
+    cleaned_text = html.unescape(cleaned_text)
+
+    # 4. Если нужно, убираем физически символы <, >
+    cleaned_text = re.sub(r'[<>]', '', cleaned_text)
+
     return cleaned_text
+
+
+
