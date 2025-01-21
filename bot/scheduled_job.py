@@ -20,9 +20,11 @@ async def publish_single_news(news, bot):
 
     # Убрали пока заголовки пока будет только первое предложение
     title = get_effective_title(news)
-    raw_html = news.get("text", "Нет содержания")
+    raw_text = news.get("text", "Нет содержания")
 
-    text_content = clean_news_html(raw_html)
+    fixed_text = clean_news_html(raw_text)
+
+    text_content = fixed_text if fixed_text != '' else raw_text
 
     # --- 1) Удаляем из текста первое предложение, если оно уже в заголовке ---
     # text_content = remove_first_sentence_if_in_title(text_content, title)
@@ -45,15 +47,8 @@ async def publish_single_news(news, bot):
         f"#{word.replace(' ', '_')}"
         for word in news.get("found_keywords", [])
     )
-
-
-
-
     if len(text_content) > max_news_length:
-        print(len(text_content))
         text_content = flexible_truncate_text_by_delimiters(text_content, max_news_length)
-        print(text_content)
-        print(max_news_length)
     if url:
         first_sentence, remainder = extract_and_remove_first_sentence(text_content)
         linked_first = f'<a href="{url}">{first_sentence}</a>'
@@ -65,7 +60,6 @@ async def publish_single_news(news, bot):
 
     full_text = text_content
 
-    print(len(text_content))
     try:
         # Публикуем
         if image:
@@ -108,8 +102,8 @@ async def publish_single_news(news, bot):
                 )
             except Exception as e:
                 error_message = str(e).lower()
+                logger.error(f"Ошибка при отправке новости '{title}': {e}")
                 if "can't parse entities" in error_message:
-                    logger.error(f"Ошибка при отправке новости '{title}': {e}")
                     full_text = full_text + '</a>'
                     await bot.send_message(
                         chat_id=CHANNEL_ID,

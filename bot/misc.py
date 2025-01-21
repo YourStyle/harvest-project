@@ -174,8 +174,6 @@ def flexible_truncate_text_by_delimiters(
             # Если это . ? ! ;
             return truncated_initial[: last_match.end()].rstrip()
 
-
-
     # 5) Если в гибком коридоре тоже не нашли разделитель,
     rest_part = text[max_flex_end:]
     matches_rest = list(pattern.finditer(rest_part))
@@ -322,7 +320,6 @@ def remove_custom_fragments(text: str) -> str:
     return "\n".join(new_lines)
 
 
-
 def clean_news_html(html_text: str) -> str:
     """
     Извлекает текст только из тегов <div>, <p>, <span>, при этом:
@@ -358,6 +355,3 @@ def clean_news_html(html_text: str) -> str:
     cleaned_text = re.sub(r'[<>]', '', cleaned_text)
 
     return cleaned_text
-
-
-
