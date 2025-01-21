@@ -13,10 +13,15 @@ TO_REMOVE_PATTERNS_CONDITIONAL = [
 ]
 
 TO_REMOVE_PATTERNS_UNCONDITIONAL = [
-    r'(?i)^\s*[сc]мотрите\s+нас\s+на\s+rutube,\s*youtube\s*[.,!]*\s*$',
-    r'(?i)^\s*или\s+присоединяйтесь\s+вконтакте\s*[.,!]*\s*$',
-    r'(?i)^\s*подписывайтесь\s+на\s+наш\s+telegram\s*[.,!]*\s*$',
-    r'(?i)^\s*[-—]\s*все\s+новости\s+в\s+оперативном\s+режиме\.?\s*поделиться\s*$',
+    r'(?i)^\s*telegram\s*[.,!]*\s*$',
+    r'(?i)^\s*youtube\s*[.,!]*\s*$',
+    r'(?i)^\s*rutube\s*[.,!]*\s*$',
+    r'(?i)^\s*поделиться\s*$',
+    r'(?i)^\s*вконтакте\s*[.,!]*\s*$',
+    r'(?i)^\s*[сc]мотрите\s+нас\s+на\s*$',
+    r'(?i)^\s*или\s+присоединяйтесь\s*$',
+    r'(?i)^\s*подписывайтесь\s+на\s+наш\s*[.,!]*\s*$',
+    r'(?i)^\s*[-—]\s*все\s+новости\s+в\s+оперативном\s+режиме\s*[.,!]*\s*$',
 ]
 
 
@@ -337,6 +342,15 @@ def remove_custom_fragments(text: str) -> str:
         new_lines.append(line)
 
     return "\n".join(new_lines)
+
+def remove_duplicate_dots(text: str) -> str:
+    """
+    Заменяет последовательность ". [пробелы] ." на одинарную точку.
+    Пример:
+        "Что-то . ." -> "Что-то ."
+        "Текст.  . Ещё" -> "Текст. Ещё"
+    """
+    return re.sub(r'\.\s*\.', '.', text)
 
 def clean_news_html(html_text: str) -> str:
     """

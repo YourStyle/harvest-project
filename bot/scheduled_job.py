@@ -8,7 +8,7 @@ from database import collection, config_collection
 
 from misc import get_effective_title, flexible_truncate_text_by_delimiters, remove_first_sentence_if_in_title, \
     remove_publication_date_lines, remove_custom_fragments, compress_newlines, extract_and_remove_first_sentence, \
-    join_single_word_lines, clean_news_html
+    join_single_word_lines, clean_news_html, remove_duplicate_dots
 
 # либо передавать его в функцию scheduled как параметр
 MAX_MESSAGE_LENGTH = 4096  # fallback, если не найдёт в конфиге
@@ -35,6 +35,7 @@ async def publish_single_news(news, bot):
     text_content = remove_custom_fragments(text_content)
 
     text_content = compress_newlines(text_content)
+    text_content = remove_duplicate_dots(text_content)
 
     text_content = join_single_word_lines(text_content)
 
