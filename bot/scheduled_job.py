@@ -8,7 +8,7 @@ from database import collection, config_collection
 
 from misc import get_effective_title, flexible_truncate_text_by_delimiters, remove_first_sentence_if_in_title, \
     remove_publication_date_lines, remove_custom_fragments, compress_newlines, extract_and_remove_first_sentence, \
-    join_single_word_lines
+    join_single_word_lines, clean_news_html
 
 # либо передавать его в функцию scheduled как параметр
 MAX_MESSAGE_LENGTH = 4096  # fallback, если не найдёт в конфиге
@@ -20,7 +20,9 @@ async def publish_single_news(news, bot):
 
     # Убрали пока заголовки пока будет только первое предложение
     title = get_effective_title(news)
-    text_content = news.get("text", "Нет содержания")
+    raw_html = news.get("text", "Нет содержания")
+
+    text_content = clean_news_html(raw_html)
 
     # --- 1) Удаляем из текста первое предложение, если оно уже в заголовке ---
     # text_content = remove_first_sentence_if_in_title(text_content, title)

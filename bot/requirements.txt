@@ -1,3 +1,4 @@
 pymongo==3.12.3
 aiohttp==3.8.5
 aiogram==3.0
+beautifulsoup4==4.12.3

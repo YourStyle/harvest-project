@@ -1,5 +1,6 @@
 import re
 from config import CUSTOM_TITLE_SOURCES
+from bs4 import BeautifulSoup
 
 TO_REMOVE_PATTERNS = [
     r'^Экспорт/Импорт\s*$',
@@ -318,3 +319,27 @@ def remove_custom_fragments(text: str) -> str:
         new_lines.append(line)
 
     return "\n".join(new_lines)
+
+
+
+def clean_news_html(html: str) -> str:
+    """
+    Извлекает текст только из тегов <div>, <p> и <span>, убирая прочие теги.
+    Для этого используется BeautifulSoup. Если его нет, нужно установить:
+        pip install beautifulsoup4
+    """
+
+    soup = BeautifulSoup(html, 'html.parser')
+
+    # Соберём текст из всех <div>, <p> и <span>, включая их потомков
+    extracted_texts = []
+    for tag in soup.find_all(['div', 'p', 'span']):
+        # get_text() вернёт текст всего вложенного содержимого
+        # strip=True убирает пробелы/переносы по краям
+        text_chunk = tag.get_text(strip=True)
+        if text_chunk:
+            extracted_texts.append(text_chunk)
+
+    # Склеим все фрагменты, вставляя перенос строки
+    cleaned_text = "\n".join(extracted_texts)
+    return cleaned_text
