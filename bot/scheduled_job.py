@@ -121,6 +121,10 @@ async def publish_single_news(news, bot):
 
         logger.info(f"Новость '{title}' опубликована.")
     except Exception as e:
+        collection.update_one(
+            {"_id": news["_id"]},
+            {"$set": {"published": True}}
+        )
         logger.error(f"Ошибка при публикации новости '{title}': {e}")
 
 
