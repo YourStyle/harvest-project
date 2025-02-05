@@ -21,7 +21,7 @@ async def main():
     dp.message.middleware(ResetFSMOnCommandMiddleware())
 
     # Запускаем фоновой таск
-    asyncio.create_task(scheduled(bot))
+    asyncio.create_task(scheduled(bot, ))
 
     # Запускаем бота
     try:

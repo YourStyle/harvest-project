@@ -14,7 +14,7 @@ from misc import get_effective_title, flexible_truncate_text_by_delimiters, remo
 MAX_MESSAGE_LENGTH = 4096  # fallback, если не найдёт в конфиге
 
 
-async def publish_single_news(news, bot):
+async def publish_single_news(news, bot, channel_ids):
     config = config_collection.find_one({"_id": "bot_config"})
     max_news_length = config.get('max_news_length', MAX_MESSAGE_LENGTH)
 
@@ -60,79 +60,84 @@ async def publish_single_news(news, bot):
         pass
 
     full_text = text_content
-
-    try:
-        # Публикуем
-        if image:
-            try:
-                await bot.send_message(
-                    chat_id=CHANNEL_ID,
-                    text=full_text,
-                    parse_mode='HTML',
-                    disable_web_page_preview=True
-                )
-            except Exception as e:
-                error_message = str(e).lower()
-                # Если ошибка связана с URL изображения, публикуем без картинки
-                if "http url content" in error_message or "wrong file identifier" in error_message:
-                    logger.error(f"Ошибка при отправке изображения для новости '{title}': {e}")
-                    logger.info(f"Публикуем новость '{title}' без изображения.")
+    for channel in channel_ids:
+        try:
+            # Публикуем
+            if image:
+                try:
                     await bot.send_message(
-                        chat_id=CHANNEL_ID,
+                        chat_id=channel,
                         text=full_text,
                         parse_mode='HTML',
                         disable_web_page_preview=True
                     )
-                elif "can't parse entities" in error_message:
-                    full_text = full_text + '</a>'
+                except Exception as e:
+                    error_message = str(e).lower()
+                    # Если ошибка связана с URL изображения, публикуем без картинки
+                    if "http url content" in error_message or "wrong file identifier" in error_message:
+                        logger.error(f"Ошибка при отправке изображения для новости '{title}': {e}")
+                        logger.info(f"Публикуем новость '{title}' без изображения.")
+                        await bot.send_message(
+                            chat_id=channel,
+                            text=full_text,
+                            parse_mode='HTML',
+                            disable_web_page_preview=True
+                        )
+                    elif "can't parse entities" in error_message:
+                        full_text = full_text + '</a>'
+                        await bot.send_message(
+                            chat_id=channel,
+                            text=full_text,
+                            parse_mode='HTML',
+                            disable_web_page_preview=True
+                        )
+                    else:
+                        raise e
+            else:
+                try:
                     await bot.send_message(
-                        chat_id=CHANNEL_ID,
+                        chat_id=channel,
                         text=full_text,
                         parse_mode='HTML',
                         disable_web_page_preview=True
                     )
-                else:
-                    raise e
-        else:
-            try:
-                await bot.send_message(
-                    chat_id=CHANNEL_ID,
-                    text=full_text,
-                    parse_mode='HTML',
-                    disable_web_page_preview=True
-                )
-            except Exception as e:
-                error_message = str(e).lower()
-                logger.error(f"Ошибка при отправке новости '{title}': {e}")
-                if "can't parse entities" in error_message:
-                    full_text = full_text + '</a>'
-                    await bot.send_message(
-                        chat_id=CHANNEL_ID,
-                        text=full_text,
-                        parse_mode='HTML',
-                        disable_web_page_preview=True
-                    )
+                except Exception as e:
+                    error_message = str(e).lower()
+                    logger.error(f"Ошибка при отправке новости '{title}': {e}")
+                    if "can't parse entities" in error_message:
+                        full_text = full_text + '</a>'
+                        await bot.send_message(
+                            chat_id=channel,
+                            text=full_text,
+                            parse_mode='HTML',
+                            disable_web_page_preview=True
+                        )
 
-        # Отмечаем новость как опубликованную
-        collection.update_one(
-            {"_id": news["_id"]},
-            {"$set": {"published": True}}
-        )
+            # Отмечаем новость как опубликованную
+            collection.update_one(
+                {"_id": news["_id"]},
+                {"$set": {"published": True}}
+            )
 
-        logger.info(f"Новость '{title}' опубликована.")
-    except Exception as e:
-        collection.update_one(
-            {"_id": news["_id"]},
-            {"$set": {"published": True}}
-        )
-        logger.error(f"Ошибка при публикации новости '{title}': {e}")
+            logger.info(f"Новость '{title}' опубликована.")
+        except Exception as e:
+            collection.update_one(
+                {"_id": news["_id"]},
+                {"$set": {"published": True}}
+            )
+            logger.error(f"Ошибка при публикации новости '{title}': {e}")
 
 
-async def scheduled(bot):
+async def scheduled(bot, channel_ids=None):
     """
     Запускается в виде фоновой задачи из main.py
     Периодически публикует новости в канал
     """
+    if channel_ids is None:
+        all_ids = [CHANNEL_ID]
+    else:
+        all_ids = channel_ids
+
     while True:
         config = config_collection.find_one({"_id": "bot_config"})
         news_per_interval = config.get('news_per_hour', 5)
@@ -156,7 +161,7 @@ async def scheduled(bot):
             news = collection.find_one({"published": False})
             if news:
                 try:
-                    await publish_single_news(news, bot)
+                    await publish_single_news(news, bot, all_ids)
                     published_count += 1
                     config_collection.update_one(
                         {"_id": "bot_config"},
